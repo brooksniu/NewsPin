@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Your Briefing</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        #chatModal {
+            display: none;
+            position: fixed;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.75);
+            z-index: 1000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        #chatContent {
+            background: white;
+            width: 40%;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        #chatHistory {
+            height: 300px;
+            overflow-y: auto;
+            background: #f9f9f9;
+            margin-bottom: 10px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+        }
+        #chatInput, #searchInput {
+            width: calc(100% - 90px);
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+            margin-right: 10px;
+        }
+        #searchButton, button {
+            padding: 10px 16px;
+            border-radius: 9999px;
+            border: none;
+            background-color: #3b82f6;
+            color: white;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #2563eb;
+        }
+        .message {
+            padding: 5px;
+            border-radius: 5px;
+            margin-bottom: 5px;
+        }
+        .user {
+            background-color: #dbf0ff;
+            align-self: flex-end;
+        }
+        .assistant {
+            background-color: #f0f0f0;
+            align-self: flex-start;
+        }
+    </style>
+    
+</head>
+<body class="bg-gray-100" onload="initializeNews()">
+    <div class="container mx-auto px-4">
+        <header class="border-b border-gray-300 py-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center">
+                    <div class="mr-6">
+                        <i class="fas fa-bars"></i>
+                    </div>
+                    <div class="flex items-center space-x-4" id="categoryNav">
+                        <a href="#" onclick="fetchNews('general', this)" class="text-blue-500">Home</a>
+                        <a href="#" onclick="fetchNews('world', this)" class="text-gray-700">World</a>
+                        <a href="#" onclick="fetchNews('nation', this)" class="text-gray-700">Nation</a>
+                        <a href="#" onclick="fetchNews('business', this)" class="text-gray-700">Business</a>
+                        <a href="#" onclick="fetchNews('technology', this)" class="text-gray-700">Technology</a>
+                        <a href="#" onclick="fetchNews('entertainment', this)" class="text-gray-700">Entertainment</a>
+                        <a href="#" onclick="fetchNews('sports', this)" class="text-gray-700">Sports</a>
+                        <a href="#" onclick="fetchNews('science', this)" class="text-gray-700">Science</a>
+                        <a href="#" onclick="fetchNews('health', this)" class="text-gray-700">Health</a>
+                    </div>
+                </div>
+            </div>
+        </header>
+        <div id="searchBar">
+            <input type="text" id="searchInput" placeholder="Let me know which news you're interested in!">
+            <button id="searchButton" onclick="fetchNews()">Search</button>
+        </div>
+        <main class="py-6">
+            <h1 class="text-2xl font-bold">Your NewsPin</h1>
+            <p class="text-gray-600 text-sm my-2" id="currentDate"></p>
+
+            <section class="my-4">
+                <h2 class="text-xl font-semibold mb-2">Top stories</h2>
+                <div class="grid grid-cols-3 gap-4" id="newsContainer">
+                    <!-- News articles will be displayed here -->
+                </div>
+            </section>
+        </main>
+    </div>
+    <div id="chatModal">
+        <div id="chatContent">
+            <h3 class="font-bold">Discuss the News</h3>
+            <div id="chatHistory" style="height: 300px; overflow-y: auto; background: #f9f9f9; margin-bottom: 10px; padding: 10px; border: 1px solid #ccc;">
+                <!-- Chat messages will be displayed here -->
+            </div>
+            <input type="text" id="chatInput" placeholder="Type your message here..." style="width: 80%; padding: 10px; margin-right: 10px; border-radius: 5px; border: 1px solid #ccc;">
+            <button onclick="sendChat()">Send</button>
+            <button onclick="closeChat()">Close</button>
+        </div>
+    </div>    
+    <script>
+ let conversation = []; // Store conversation history
+
+ async function openChat(newsContent) {
+    console.log('openChat called with content:', newsContent); // 添加此行来跟踪函数调用
+    document.getElementById('chatModal').style.display = 'block';
+    document.getElementById('chatHistory').innerHTML = ''; // Reset chat history
+    conversation = []; // Clear conversation history
+    let formattedContent = "Here is the news content: " + newsContent + "\nWrite a summary of this news.";
+    sendChat(formattedContent, true); // Send initial news content as a message with a summarization task
+}
+
+async function sendChat(message, initial = false) {
+    if (!message && !initial) {
+        message = document.getElementById('chatInput').value;
+        document.getElementById('chatInput').value = ''; // Clear the input after sending
+    }
+    conversation.push({"role": "user", "content": message}); // Add user message to conversation history
+    appendMessage('You', message, 'user'); // Show user message in chat history
+
+    try {
+        const response = await fetch('/chat', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({conversation: conversation})
+        });
+        const data = await response.json();
+        conversation.push({"role": "assistant", "content": data.response}); // Add assistant response to conversation history
+        appendMessage('Assistant', data.response, 'assistant'); // Show assistant's response in chat history
+    } catch (error) {
+        console.error('Error during chat:', error);
+        appendMessage('Error', 'Failed to fetch response.', 'error'); // Show error in chat history
+    }
+}
+
+function appendMessage(sender, message, type) {
+    let chatHistory = document.getElementById('chatHistory');
+    let messageElement = document.createElement('div');
+    messageElement.classList.add('message', type);
+    messageElement.textContent = `${sender}: ${message}`;
+    chatHistory.appendChild(messageElement);
+    chatHistory.scrollTop = chatHistory.scrollHeight; // Auto-scroll to the latest message
+}
+
+function closeChat() {
+    document.getElementById('chatModal').style.display = 'none';
+}
+
+        function setCurrentDate() {
+            const dateElement = document.getElementById('currentDate');
+            dateElement.textContent = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+        }
+
+        async function initializeNews() {
+            setCurrentDate();
+            fetchNews('general'); // Fetch global general news by default
+        }
+
+        async function fetchNews(category = 'general', element = null) {
+            // Change button colors
+            if (element) {
+                const links = document.querySelectorAll('#categoryNav a');
+                links.forEach(link => link.classList.replace('text-blue-500', 'text-gray-700'));
+                element.classList.replace('text-gray-700', 'text-blue-500');
+            }
+
+            const searchQuery = document.getElementById('searchInput').value || category;
+            const apiKey = '99fa531c11b6aa1e5f82a6052ed6a15d';
+            const url = `https://gnews.io/api/v4/top-headlines?topic=${searchQuery}&token=${apiKey}`;
+
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                if (data.articles) {
+                    updateNews(data.articles);
+                } else {
+                    console.error('No articles found:', data);
+                    alert('No articles found. Please try a different query.');
+                }
+            } catch (error) {
+                console.error('Error fetching news:', error);
+                alert('Failed to fetch news. Please check the console for more details.');
+            }
+        }
+        function updateNews(articles) {
+            const newsContainer = document.getElementById('newsContainer');
+            newsContainer.innerHTML = '';
+            articles.forEach(article => {
+                const newsArticle = document.createElement('div');
+                newsArticle.className = 'col-span-1 bg-white p-4 rounded-lg shadow mb-4';
+                const articleLink = document.createElement('a');
+                articleLink.href = article.url;
+                articleLink.target = '_blank';
+                articleLink.innerHTML = `
+                    <img src="${article.image || 'path_to_default_image.jpg'}" alt="${article.title}" class="rounded-lg mb-4">
+                    <h3 class="text-lg font-semibold mb-2">${article.title}</h3>
+                    <p class="text-gray-600 text-sm">${new Date(article.publishedAt).toLocaleDateString()} - ${article.source.name}</p>
+                    <p>${article.description}</p>
+                `;
+                const chatButton = document.createElement('button');
+                chatButton.textContent = 'Discuss';
+                chatButton.onclick = () => openChat(article.content);
+                newsArticle.appendChild(articleLink);
+                newsArticle.appendChild(chatButton);
+                newsContainer.appendChild(newsArticle);
+            });
+        }
+    </script>
+</body>
+</html>

@@ -425,8 +425,8 @@ async function genTimelineSummary(main_article, keyword, retrieved_articles){
                     Your job is to select articles in "Retrieved" that satisfies any of the two conditions: 1. either a cause or followup of the main_article. 
                      2. closely relates to the "main_article", especially the "keyword" given the context of "main_article".
                     Please give the response in JSON format following this template:
-                    {"index": [array of selected indicies of articles, arranged in time order], "summary": [concise plain text summary of the selected articles, mention the "keyword" and arrange the same order as in the "index" array ]}
-                    You can select up to 6 articles. If, objectively, there is no article related, answer with {"index":[], "summary":[]}.` },
+                    {"index": [array of selected indicies of articles, arranged in time order], "summary": [concise plain text summary of the selected articles, mention the "keyword" and arrange the same order as in the "index" array]}
+                    You can select up to 6 articles. Do not select article with similar content as the selected ones. If, objectively, there is no article related, answer with {"index":[], "summary":[]}.` },
                     {"role": "user", "content": queryMessage}];
     // console.log(queryMessage);
     try {
@@ -491,7 +491,7 @@ function textPopup(button, content, articles){
         // arrow
         const arrow = document.createElement('div');
         arrow.className = 'divider';
-        arrow.textContent = '-->';
+        arrow.textContent = '↓';
         // add arrow if not last entry
         if (ind != (keys.length - 1)){
             jumpTimelineButton.appendChild(arrow);

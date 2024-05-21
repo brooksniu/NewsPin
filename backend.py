@@ -13,7 +13,7 @@ def index():
 
 @app.route('/chat', methods=['POST'])
 def chat():
-    client = OpenAI(api_key='YOUR_API_KEY')
+    client = OpenAI(api_key='')
     conversation = request.json['conversation']
     completion = client.chat.completions.create(
         model="gpt-3.5-turbo",

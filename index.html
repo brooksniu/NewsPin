@@ -111,7 +111,8 @@
         </header>
         <div id="searchBar">
             <input type="text" id="searchInput" placeholder="Let me know which news you're interested in!">
-            <button id="searchButton" onclick="fetchNews('general', null, false, true)">Search</button>
+            <!-- search and return top 10 news from API -->
+            <button id="searchButton" onclick="searchAndUpdate(10)">Search</button>
             <button id="recommendationButton" onclick="fetchNews('general', null, true)">Recommendations for me</button>
         </div>
         <main class="py-6">
@@ -251,15 +252,25 @@ async function initializeNews() {
     fetchNews('general'); // Fetch global general news by default
 }
 
-// given query_content : str , returns the results
+// for search button, get content from input field
+async function searchAndUpdate(n_return = 10) {
+    searchQuery = document.getElementById('searchInput').value;
+    if (!searchQuery){
+        return
+    }
+    const newsArticles = await searchNews(searchQuery, n_return);
+    updateNews(newsArticles)
+}
+
+// given searchQuery : str , returns the results
 // n_return: number of articles returned
-async function searchNews(query_content = '', n_return = 10) {
+async function searchNews(searchQuery = '', n_return = 10) {
     // check for empty query
-    if (!query_content){
+    if (!searchQuery){
         return
     }
 
-    const url = `https://gnews.io/api/v4/search?q="${query_content}"&lang=en&token=${apiKey}&expand=content`;
+    const url = `https://gnews.io/api/v4/search?q="${searchQuery}"&lang=en&token=${apiKey}&expand=content`;
 
     try {
         const response = await fetch(url);
@@ -280,7 +291,7 @@ async function searchNews(query_content = '', n_return = 10) {
 }
 
 
-async function fetchNews(category = 'general', element = null, recommendation = false, search = false) {
+async function fetchNews(category = 'general', element = null, recommendation = false) {
     // Change button colors
     if (element) {
         const links = document.querySelectorAll('#categoryNav a');
@@ -290,11 +301,6 @@ async function fetchNews(category = 'general', element = null, recommendation = 
 
     // Generate search query dynamically based on whether user chooses recommendation
     let searchQuery = false;
-    console.log('search: ', search)
-    if (search){
-        searchQuery = document.getElementById('searchInput').value;
-        // console.log('query: ', searchQuery)
-    }
 
     if(recommendation){
         searchQuery = await generatePersonalizedQuery();
@@ -418,8 +424,9 @@ async function genTimelineSummary(main_article, keyword, retrieved_articles){
                     You will be given a main article starting with label "main_article", a keyword starting with label "keyword", and an array of JSON objects starting after label "Retrieved", containing meatadata and content of 10 articles.
                     Your job is to select articles in "Retrieved" that satisfies any of the two conditions: 1. either a cause or followup of the main_article. 
                      2. closely relates to the "main_article", especially the "keyword" given the context of "main_article".
-                    Please give the response in JSON format with each entry formatted as {index of the article as in "Retrieved": a concise plain text summary of the article}.
-                    Articles in response JSON should be arranged in time order, you can select up to 6 articles. If you think there is no article related, simply give {}` },
+                    Please give the response in JSON format following this template:
+                    {"index": [array of selected indicies of articles, arranged in time order], "summary": [concise plain text summary of the selected articles, mention the "keyword" and arrange the same order as in the "index" array ]}
+                    You can select up to 6 articles. If, objectively, there is no article related, answer with {"index":[], "summary":[]}.` },
                     {"role": "user", "content": queryMessage}];
     // console.log(queryMessage);
     try {
@@ -441,6 +448,7 @@ async function genTimelineSummary(main_article, keyword, retrieved_articles){
 
 // button: the button when clicked to show the popup
 // content: here, specifically for a json object as retured in genTimelineSummary
+// content formatted as {"index": [array of selected indicies of articles, arranged in time order], "summary": [concise plain text summary of the selected articles, arranged the same order as in the "index" array ]}
 // articles: all article in the LLM query (10 articles)
 function textPopup(button, content, articles){
     const popup = document.createElement('div');
@@ -460,17 +468,24 @@ function textPopup(button, content, articles){
     // this button displayes the timeline summaries, when clicked, refill the page with timeline news contents
     const jumpTimelineButton = document.createElement('button');
     popup.appendChild(jumpTimelineButton);
-    const keys = Object.keys(content).reverse();
-    let select_articles = []
+    // get selected indicies, reverse to get time order from past --> now
+    const keys = content['index'].reverse();
+    // get corresponding contents
+    const summaries = content['summary'].reverse();
     // give timeline text, select articles for jump
-    // Here, key is indicies for articles selected by LLM
-    for (const key of keys) {
+    let selectArticles = []
+
+    // Here, go through each selection to display summary and construct jumping page
+    for (const ind in keys) {
         // console.log(articles[key])
+        // select with index of the current selected article in all searched
+        const currentArticle = articles[keys[ind]]
         // create timeline text
         // get time of article
-        const newsDate = '[ ' + articles[key].publishedAt.substring(0,10) + ' ]'
+        const newsDate = '[ ' + currentArticle.publishedAt.substring(0,10) + ' ]'
         const summary = document.createElement('div');
-        summary.innerText = newsDate + content[key];
+        // get summary from LLM summaries
+        summary.innerText = newsDate + summaries[ind];
         jumpTimelineButton.appendChild(summary);
 
         // arrow
@@ -478,21 +493,18 @@ function textPopup(button, content, articles){
         arrow.className = 'divider';
         arrow.textContent = '-->';
         // add arrow if not last entry
-        if (key != keys[keys.length - 1]){
+        if (ind != (keys.length - 1)){
             jumpTimelineButton.appendChild(arrow);
         }
 
         // select articles
-        select_articles.push(articles[key])
-
-        console.log(`${key}: ${content[key]}`);
-        console.log(`select articles: ${select_articles}`);
+        selectArticles.push(currentArticle)
     }
 
     // if clicked, refill page with selected news
     jumpTimelineButton.onclick = async () => {
             popup.remove();
-            await updateNews(select_articles);
+            await updateNews(selectArticles);
         };
 
 }
@@ -531,6 +543,7 @@ function showPopup(button, content, main_article) {
         timelineButton.onclick = async () => {
             articles = await searchNews(keyword);
             timeline_summary = await genTimelineSummary(main_article, keyword, articles);
+            // console.log(timeline_summary)
             timeline_selections = JSON.parse(timeline_summary)
             // console.log(timeline_selections)
             textPopup(timelineButton, timeline_selections, articles)

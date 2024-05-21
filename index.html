@@ -19,6 +19,7 @@
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
+            display: none;
         }
         #chatHeader {
             cursor: move;
@@ -199,7 +200,7 @@ async function openChat(newsContent) {
     document.getElementById('chatModal').style.display = 'block';
     document.getElementById('chatHistory').innerHTML = ''; // Reset chat history
     conversation = []; // Clear conversation history
-    let formattedContent = "Here is the news content: " + newsContent + "\nWrite a concise summary of this news in 3 to 5 sentences.";
+    let formattedContent = "Here is the news content: " + newsContent + "\nWrite a concise summary of this news in 2 to 3 sentences.";
     sendChat(formattedContent, true); // Send initial news content as a message with a summarization task
 }
 

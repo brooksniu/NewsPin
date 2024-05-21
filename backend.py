@@ -13,10 +13,11 @@ def index():
 
 @app.route('/chat', methods=['POST'])
 def chat():
-    client = OpenAI(api_key='sk-proj-kfQ8eSttMlLvKNHgdR50T3BlbkFJwZxM6iG3ThrdLJmLdADl')
+    client = OpenAI(api_key='YOUR_API_KEY')
     conversation = request.json['conversation']
     completion = client.chat.completions.create(
         model="gpt-3.5-turbo",
+        temperature=0.0,
         messages=conversation
     )
     return jsonify({"response": completion.choices[0].message.content})

@@ -8,25 +8,26 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
     <style>
+
         #chatModal {
-            display: none;
-            position: fixed;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0,0,0,0.75);
+            width: 500px;
+            position: absolute;
+            border: 1px solid #ccc;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            background-color: white;
             z-index: 1000;
-            display: flex;
-            justify-content: center;
-            align-items: center;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+        #chatHeader {
+            cursor: move;
+            background: #f1f1f1;
+            padding: 10px;
+            border-bottom: 1px solid #ccc;
         }
         #chatContent {
-            background: white;
-            width: 40%;
-            padding: 20px;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            padding: 10px;
         }
         #chatHistory {
             height: 300px;
@@ -44,9 +45,9 @@
             border: 1px solid #ccc;
             margin-right: 10px;
         }
-        #searchButton, button {
-            padding: 10px 16px;
-            border-radius: 9999px;
+        #searchButton, #recommendationButton, button {
+            padding: 12px 10px;
+            border-radius: 8px;
             border: none;
             background-color: #3b82f6;
             color: white;
@@ -68,6 +69,20 @@
         .assistant {
             background-color: #f0f0f0;
             align-self: flex-start;
+        }
+        .popup {
+            position: absolute;
+            background-color: white;
+            border: 1px solid #ccc;
+            padding: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            z-index: 1001;
+            display: none;
+        }
+        .divider{
+            margin: 10px;
+            height:auto;
+            display:inline-block;
         }
     </style>
     
@@ -96,7 +111,8 @@
         </header>
         <div id="searchBar">
             <input type="text" id="searchInput" placeholder="Let me know which news you're interested in!">
-            <button id="searchButton" onclick="fetchNews()">Search</button>
+            <button id="searchButton" onclick="fetchNews('general', null, false, true)">Search</button>
+            <button id="recommendationButton" onclick="fetchNews('general', null, true)">Recommendations for me</button>
         </div>
         <main class="py-6">
             <h1 class="text-2xl font-bold">Your NewsPin</h1>
@@ -111,8 +127,10 @@
         </main>
     </div>
     <div id="chatModal">
-        <div id="chatContent">
+        <div id="chatHeader">
             <h3 class="font-bold">Discuss the News</h3>
+        </div>
+        <div id="chatContent">
             <div id="chatHistory" style="height: 300px; overflow-y: auto; background: #f9f9f9; margin-bottom: 10px; padding: 10px; border: 1px solid #ccc;">
                 <!-- Chat messages will be displayed here -->
             </div>
@@ -120,16 +138,67 @@
             <button onclick="sendChat()">Send</button>
             <button onclick="closeChat()">Close</button>
         </div>
-    </div>    
+    </div>   
     <script>
- let conversation = []; // Store conversation history
 
- async function openChat(newsContent) {
-    console.log('openChat called with content:', newsContent); // 添加此行来跟踪函数调用
+// make the chat window movable
+dragElement(document.getElementById("chatModal"));
+
+    function dragElement(element) {
+        var pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+        var header = document.getElementById("chatHeader");
+        if (header) {
+            header.onmousedown = dragMouseDown;
+        } else {
+            element.onmousedown = dragMouseDown;
+        }
+
+        function dragMouseDown(e) {
+            e = e || window.event;
+            e.preventDefault();
+            // Get the mouse cursor position at startup
+            pos3 = e.clientX;
+            pos4 = e.clientY;
+            document.onmouseup = closeDragElement;
+            document.onmousemove = elementDrag;
+        }
+
+        function elementDrag(e) {
+            e = e || window.event;
+            e.preventDefault();
+            // Calculate the new cursor position
+            pos1 = pos3 - e.clientX;
+            pos2 = pos4 - e.clientY;
+            pos3 = e.clientX;
+            pos4 = e.clientY;
+            // Set the element's new position
+            element.style.top = (element.offsetTop - pos2) + "px";
+            element.style.left = (element.offsetLeft - pos1) + "px";
+        }
+
+        function closeDragElement() {
+            // Stop moving when mouse button is released
+            document.onmouseup = null;
+            document.onmousemove = null;
+        }
+    }
+
+const NOT_ENOUGH_DATA = "NO_DATA";
+let conversation = []; // Store conversation history
+let useLocalStorage = false;
+let defaultUserHistory = {searchHistory: {}, categoryHistory: {}, viewedNews: {}};
+let userHistory = useLocalStorage ? JSON.parse(localStorage.getItem("userNewsHistory")) || defaultUserHistory : defaultUserHistory; // Store user actions
+
+const apiKey = 'YOUR_API_KEY';
+
+// If need to clear userHistory, use localStorage.removeItem("userNewsHistory");
+
+async function openChat(newsContent) {
+    // console.log('openChat called with content:', newsContent); // 添加此行来跟踪函数调用
     document.getElementById('chatModal').style.display = 'block';
     document.getElementById('chatHistory').innerHTML = ''; // Reset chat history
     conversation = []; // Clear conversation history
-    let formattedContent = "Here is the news content: " + newsContent + "\nWrite a summary of this news.";
+    let formattedContent = "Here is the news content: " + newsContent + "\nWrite a concise summary of this news in 3 to 5 sentences.";
     sendChat(formattedContent, true); // Send initial news content as a message with a summarization task
 }
 
@@ -139,8 +208,9 @@ async function sendChat(message, initial = false) {
         document.getElementById('chatInput').value = ''; // Clear the input after sending
     }
     conversation.push({"role": "user", "content": message}); // Add user message to conversation history
-    appendMessage('You', message, 'user'); // Show user message in chat history
-
+    if (!initial){
+        appendMessage('You', message, 'user'); // Show user message in chat history
+    }
     try {
         const response = await fetch('/chat', {
             method: 'POST',
@@ -171,68 +241,330 @@ function closeChat() {
     document.getElementById('chatModal').style.display = 'none';
 }
 
-        function setCurrentDate() {
-            const dateElement = document.getElementById('currentDate');
-            dateElement.textContent = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+function setCurrentDate() {
+    const dateElement = document.getElementById('currentDate');
+    dateElement.textContent = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+}
+
+async function initializeNews() {
+    setCurrentDate();
+    fetchNews('general'); // Fetch global general news by default
+}
+
+// given query_content : str , returns the results
+// n_return: number of articles returned
+async function searchNews(query_content = '', n_return = 10) {
+    // check for empty query
+    if (!query_content){
+        return
+    }
+
+    const url = `https://gnews.io/api/v4/search?q="${query_content}"&lang=en&token=${apiKey}&expand=content`;
+
+    try {
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const data = await response.json();
+        if (data.articles) {
+            return data.articles;
+        } else {
+            console.error('No articles found:', data);
+            alert('No articles found. Please try a different query.');
+        }
+    } catch (error) {
+        console.error('Error fetching news:', error);
+        // alert('Failed to fetch news. Please check the console for more details.');
+    }
+}
+
+
+async function fetchNews(category = 'general', element = null, recommendation = false, search = false) {
+    // Change button colors
+    if (element) {
+        const links = document.querySelectorAll('#categoryNav a');
+        links.forEach(link => link.classList.replace('text-blue-500', 'text-gray-700'));
+        element.classList.replace('text-gray-700', 'text-blue-500');
+    }
+
+    // Generate search query dynamically based on whether user chooses recommendation
+    let searchQuery = false;
+    console.log('search: ', search)
+    if (search){
+        searchQuery = document.getElementById('searchInput').value;
+        // console.log('query: ', searchQuery)
+    }
+
+    if(recommendation){
+        searchQuery = await generatePersonalizedQuery();
+    }
+
+    const url = `https://gnews.io/api/v4/top-headlines?category=${category}${(searchQuery && searchQuery != NOT_ENOUGH_DATA) ? "&q="+searchQuery : ""}&lang=en&token=${apiKey}&expand=content`;
+
+    // save user history
+    if(!recommendation && category != 'general'){
+        saveUserHistory(userHistory.categoryHistory, category);
+        // console.log("test")
+    }
+    if(!recommendation && searchQuery){
+        saveUserHistory(userHistory.searchHistory, searchQuery);
+    }
+    try {
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const data = await response.json();
+        if (data.articles) {
+            updateNews(data.articles);
+        } else {
+            console.error('No articles found:', data);
+            alert('No articles found. Please try a different query.');
+        }
+    } catch (error) {
+        console.error('Error fetching news:', error);
+        // alert('Failed to fetch news. Please check the console for more details.');
+    }
+}
+
+function updateNews(articles) {
+    const newsContainer = document.getElementById('newsContainer');
+    newsContainer.innerHTML = '';
+    articles.forEach(article => {
+        const newsArticle = document.createElement('div');
+        newsArticle.className = 'col-span-1 bg-white p-4 rounded-lg shadow mb-4';
+        const articleLink = document.createElement('a');
+        articleLink.href = article.url;
+        articleLink.target = '_blank';
+        articleLink.innerHTML = `
+        <img src="${article.image || 'path_to_default_image.jpg'}" alt="${article.title}" class="rounded-lg mb-4">
+        <h3 class="text-lg font-semibold mb-2">${article.title}</h3>
+        <p class="text-gray-600 text-sm">${new Date(article.publishedAt).toLocaleDateString()} - ${article.source.name}</p>
+        <p>${article.description}</p>
+        `;
+        articleLink.onclick = () => saveUserHistory(userHistory.viewedNews, article.title);
+        const chatButton = document.createElement('button');
+        chatButton.textContent = 'Summary & Discuss';
+        chatButton.onclick = () => {
+            saveUserHistory(userHistory.viewedNews, article.title);
+            openChat(article.content);
+        };
+        // divider for better visuals
+        const divider = document.createElement('div');
+        divider.className = 'divider';
+        divider.textContent = '|'
+        // button for timeline functions
+        const timelineButton = document.createElement('button');
+        timelineButton.textContent = 'TimeLine';
+        timelineButton.onclick = async () => {
+            saveUserHistory(userHistory.viewedNews, article.title);
+            let timeline_keywords = await genTimelineQuery(article.content);
+            showPopup(timelineButton, timeline_keywords, article);
+            // await fetchNews('general', null, false, false, timeline_keywords)
+            // console.log(JSON.stringify(article));
+        };
+
+        newsArticle.appendChild(articleLink);
+        newsArticle.appendChild(chatButton);
+        newsArticle.appendChild(divider);
+        newsArticle.appendChild(timelineButton);
+        newsContainer.appendChild(newsArticle);
+    });
+}
+
+function saveUserHistory(object, field){
+    let oldHistory = object[field];
+    if(oldHistory){
+        object[field] = oldHistory + 1;
+    }else{
+        object[field] = 1;
+    }
+    console.log(userHistory);
+    localStorage.setItem("userNewsHistory", JSON.stringify(userHistory));
+}
+
+// given article content, get related news keywords
+async function genTimelineQuery(content){
+    let queryMessage = 
+        `Imagine you're an advanced news recommendation system. 
+Based on this article content, generate at most 3 keywords as the names of main person in the news or the company names or the locations. Concatenate them with the keyword OR. 
+If there's not enough data, just return ${NOT_ENOUGH_DATA}.
+${JSON.stringify(content)}`;
+    let message = [{"role": "user", "content": queryMessage}];
+    // console.log(queryMessage);
+    try {
+        const response = await fetch('/chat', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({conversation: message})
+        });
+        const data = await response.json();
+        // console.log(data.response);
+        return data.response;
+    } catch (error) {
+        console.error('Error during chat:', error);
+        appendMessage('Error', 'Failed to fetch response.', 'error'); // Show error in chat history
+    }
+}
+
+// given article content, get rankings of relations
+async function genTimelineSummary(main_article, keyword, retrieved_articles){
+    let queryMessage = `"main_article": ${JSON.stringify(main_article)}; "keyword": ${keyword}; "Retrieved": ${retrieved_articles}`;
+    let message = [{"role": "system", "content": `You are an advanced and helpful news recommendation and summarization system. Your summarization should be 
+                    concise and without any redundant sentences such as "This article talks about...". 
+                    You will be given a main article starting with label "main_article", a keyword starting with label "keyword", and an array of JSON objects starting after label "Retrieved", containing meatadata and content of 10 articles.
+                    Your job is to select articles in "Retrieved" that satisfies any of the two conditions: 1. either a cause or followup of the main_article. 
+                     2. closely relates to the "main_article", especially the "keyword" given the context of "main_article".
+                    Please give the response in JSON format with {index of the article as in "Retrieved": a brief plain text summary of the content}.
+                    Articles in response JSON should be arranged in time order, you can select up to 6 articles. If you think there is no article related, simply give {}` },
+                    {"role": "user", "content": queryMessage}];
+    // console.log(queryMessage);
+    try {
+        const response = await fetch('/chat', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({conversation: message})
+        });
+        const data = await response.json();
+        // console.log(data.response);
+        return data.response;
+    } catch (error) {
+        console.error('Error during chat:', error);
+        appendMessage('Error', 'Failed to fetch response.', 'error'); // Show error in chat history
+    }
+}
+
+// button: the button when clicked to show the popup
+// content: here, specifically for a json object as retured in genTimelineSummary
+// articles: all article in the LLM query (10 articles)
+function textPopup(button, content, articles){
+    const popup = document.createElement('div');
+    popup.className = 'popup';
+    document.body.appendChild(popup);
+    let rect = button.getBoundingClientRect();
+    popup.style.top = rect.top + window.scrollY + rect.height + 'px';
+    popup.style.left = rect.left + window.scrollX + 'px';
+    popup.style.display = 'block';
+
+    document.addEventListener('click', function hidePopup(event) {
+        if (!popup.contains(event.target) && event.target !== button) {
+            popup.remove();
+            document.removeEventListener('click', hidePopup);
+        }
+    });
+    // this button displayes the timeline summaries, when clicked, refill the page with timeline news contents
+    const jumpTimelineButton = document.createElement('button');
+    popup.appendChild(jumpTimelineButton);
+    const keys = Object.keys(content).reverse();
+    let select_articles = []
+    // give timeline text, select articles for jump
+    // Here, key is indicies for articles selected by LLM
+    for (const key of keys) {
+        // console.log(articles[key])
+        // create timeline text
+        // get time of article
+        const newsDate = '[ ' + articles[key].publishedAt.substring(0,10) + ' ]'
+        const summary = document.createElement('div');
+        summary.innerText = newsDate + content[key];
+        jumpTimelineButton.appendChild(summary);
+
+        // arrow
+        const arrow = document.createElement('div');
+        arrow.className = 'divider';
+        arrow.textContent = '-->';
+        // add arrow if not last entry
+        if (key != keys[keys.length - 1]){
+            jumpTimelineButton.appendChild(arrow);
         }
 
-        async function initializeNews() {
-            setCurrentDate();
-            fetchNews('general'); // Fetch global general news by default
-        }
+        // select articles
+        select_articles.push(articles[key])
 
-        async function fetchNews(category = 'general', element = null) {
-            // Change button colors
-            if (element) {
-                const links = document.querySelectorAll('#categoryNav a');
-                links.forEach(link => link.classList.replace('text-blue-500', 'text-gray-700'));
-                element.classList.replace('text-gray-700', 'text-blue-500');
-            }
+        console.log(`${key}: ${content[key]}`);
+        console.log(`select articles: ${select_articles}`);
+    }
 
-            const searchQuery = document.getElementById('searchInput').value || category;
-            const apiKey = '99fa531c11b6aa1e5f82a6052ed6a15d';
-            const url = `https://gnews.io/api/v4/top-headlines?topic=${searchQuery}&token=${apiKey}`;
+    // if clicked, refill page with selected news
+    jumpTimelineButton.onclick = async () => {
+            popup.remove();
+            await updateNews(select_articles);
+        };
 
-            try {
-                const response = await fetch(url);
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const data = await response.json();
-                if (data.articles) {
-                    updateNews(data.articles);
-                } else {
-                    console.error('No articles found:', data);
-                    alert('No articles found. Please try a different query.');
-                }
-            } catch (error) {
-                console.error('Error fetching news:', error);
-                alert('Failed to fetch news. Please check the console for more details.');
-            }
+}
+
+function showPopup(button, content, main_article) {
+    let popup = document.createElement('div');
+    popup.className = 'popup';
+    document.body.appendChild(popup);
+    
+    let rect = button.getBoundingClientRect();
+    popup.style.top = rect.top + window.scrollY + rect.height + 'px';
+    popup.style.left = rect.left + window.scrollX + 'px';
+    popup.style.display = 'block';
+
+    document.addEventListener('click', function hidePopup(event) {
+        if (!popup.contains(event.target) && event.target !== button) {
+            popup.remove();
+            document.removeEventListener('click', hidePopup);
         }
-        function updateNews(articles) {
-            const newsContainer = document.getElementById('newsContainer');
-            newsContainer.innerHTML = '';
-            articles.forEach(article => {
-                const newsArticle = document.createElement('div');
-                newsArticle.className = 'col-span-1 bg-white p-4 rounded-lg shadow mb-4';
-                const articleLink = document.createElement('a');
-                articleLink.href = article.url;
-                articleLink.target = '_blank';
-                articleLink.innerHTML = `
-                    <img src="${article.image || 'path_to_default_image.jpg'}" alt="${article.title}" class="rounded-lg mb-4">
-                    <h3 class="text-lg font-semibold mb-2">${article.title}</h3>
-                    <p class="text-gray-600 text-sm">${new Date(article.publishedAt).toLocaleDateString()} - ${article.source.name}</p>
-                    <p>${article.description}</p>
-                `;
-                const chatButton = document.createElement('button');
-                chatButton.textContent = 'Discuss';
-                chatButton.onclick = () => openChat(article.content);
-                newsArticle.appendChild(articleLink);
-                newsArticle.appendChild(chatButton);
-                newsContainer.appendChild(newsArticle);
-            });
-        }
+    });
+
+    const divider = document.createElement('div');
+    divider.className = 'divider';
+    divider.textContent = '|'
+    popup.appendChild(divider)
+
+    // display keywords 
+    const keywords = content.split("OR")
+    keywords.forEach(keyword => {
+        const divider = document.createElement('div');
+        divider.className = 'divider';
+        divider.textContent = '|'
+        const timelineButton = document.createElement('button');
+        timelineButton.textContent = keyword;
+        // onclick: LLM search & Summary & Recommend
+        timelineButton.onclick = async () => {
+            articles = await searchNews(keyword);
+            timeline_summary = await genTimelineSummary(main_article, keyword, articles);
+            timeline_selections = JSON.parse(timeline_summary)
+            // console.log(timeline_selections)
+            textPopup(timelineButton, timeline_selections, articles)
+        };
+        popup.appendChild(timelineButton)
+        popup.appendChild(divider)
+    });
+}
+
+async function generatePersonalizedQuery(){
+    let queryMessage = 
+        `Imagine you're an advanced news recommendation system. 
+        Based on this user view and search history data along with their frequency, generate at most 10 keywords that best fit the user's preferences. Concatenate them with the keyword OR. 
+        If there's not enough data, just return ${NOT_ENOUGH_DATA}.
+        ${JSON.stringify(userHistory)}`;
+    let message = [{"role": "user", "content": queryMessage}];
+    console.log(queryMessage);
+    try {
+        const response = await fetch('/chat', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({conversation: message})
+        });
+        const data = await response.json();
+        console.log(data.response);
+        return data.response;
+    } catch (error) {
+        console.error('Error during chat:', error);
+        appendMessage('Error', 'Failed to fetch response.', 'error'); // Show error in chat history
+    }
+}
+
     </script>
 </body>
 </html>

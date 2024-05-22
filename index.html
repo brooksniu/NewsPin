@@ -7,6 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.8.1/font/bootstrap-icons.min.css">
     <style>
 
         #chatModal {
@@ -46,7 +47,7 @@
             border: 1px solid #ccc;
             margin-right: 10px;
         }
-        #searchButton, #recommendationButton, button {
+        /* #searchButton, #recommendationButton, button {
             padding: 12px 10px;
             border-radius: 8px;
             border: none;
@@ -54,7 +55,7 @@
             color: white;
             cursor: pointer;
             transition: background-color 0.3s;
-        }
+        } */
         button:hover {
             background-color: #2563eb;
         }
@@ -92,7 +93,7 @@
     <div class="container mx-auto px-4">
         <header class="border-b border-gray-300 py-4">
             <div class="flex items-center justify-between">
-                <div class="flex items-center">
+                <div class="flex items-center w-full">
                     <div class="mr-6">
                         <i class="fas fa-bars"></i>
                     </div>
@@ -107,21 +108,28 @@
                         <a href="#" onclick="fetchNews('science', this)" class="text-gray-700">Science</a>
                         <a href="#" onclick="fetchNews('health', this)" class="text-gray-700">Health</a>
                     </div>
+                    <div class="flex items-right justify-end w-full">
+                        <button id="clearHistoryButton" class="text-white py-1 px-2 rounded-md transition ease-in-out bg-red-500 hover:bg-red-600" onclick="clearUserHistory()">Clear user history</button>
+                    </div>
                 </div>
             </div>
         </header>
         <div id="searchBar">
             <input type="text" id="searchInput" placeholder="Let me know which news you're interested in!">
             <!-- search and return top 10 news from API -->
-            <button id="searchButton" onclick="searchAndUpdate(10)">Search</button>
-            <button id="recommendationButton" onclick="fetchNews('general', null, true)">Recommendations for me</button>
+            <button id="searchButton" class="text-white py-2 px-3 rounded-md transition ease-in-out bg-blue-500 hover:bg-blue-600" onclick="searchAndUpdate(10)">Search</button>
+            <button id="recommendationButton" class="text-white py-2 px-3 rounded-md transition ease-in-out bg-orange-500 hover:bg-orange-600"onclick="fetchNews('general', null, true)">Recommendations for me</button>
         </div>
         <main class="py-6">
             <h1 class="text-2xl font-bold">Your NewsPin</h1>
             <p class="text-gray-600 text-sm my-2" id="currentDate"></p>
 
             <section class="my-4">
-                <h2 class="text-xl font-semibold mb-2">Top stories</h2>
+                <select name="pages" id="pages" class="text-xl font-semibold mb-2 p-2" onchange="changePages(this.value)">
+                    <option value="topStories">Top stories</option>
+                    <option value="yourFavorite">Your favorite</option>
+                </select>
+                <!-- <h2 class="text-xl font-semibold mb-2">Top stories</h2> -->
                 <div class="grid grid-cols-3 gap-4" id="newsContainer">
                     <!-- News articles will be displayed here -->
                 </div>
@@ -140,7 +148,8 @@
             <button onclick="sendChat()">Send</button>
             <button onclick="closeChat()">Close</button>
         </div>
-    </div>   
+    </div>
+    <script src="./dev-mockNewsList.js"></script> 
     <script>
 
 // make the chat window movable
@@ -186,14 +195,25 @@ dragElement(document.getElementById("chatModal"));
     }
 
 const NOT_ENOUGH_DATA = "NO_DATA";
+const UNFAVED_BUTTON_CLASS = 'bi bi-heart py-1 px-3 cursor-pointer text-slate-500';
+const FAVED_BUTTON_CLASS = 'bi bi-heart-fill py-1 px-3 cursor-pointer text-red-500';
+const RECOMMENDER_KEYWORD_LIMIT = 5;
+const TIMELINE_KEYWORD_LIMIT = 3;
+
 let conversation = []; // Store conversation history
-let useLocalStorage = false;
-let defaultUserHistory = {searchHistory: {}, categoryHistory: {}, viewedNews: {}};
+let useLocalStorage = true;
+let defaultUserHistory = {searchHistory: {}, categoryHistory: {}, viewedNews: {}, favNews: []};
 let userHistory = useLocalStorage ? JSON.parse(localStorage.getItem("userNewsHistory")) || defaultUserHistory : defaultUserHistory; // Store user actions
 
 const apiKey = 'f97bf0827b7ffb71784b746556766e84';
 
 // If need to clear userHistory, use localStorage.removeItem("userNewsHistory");
+
+function clearUserHistory(){
+    userHistory = defaultUserHistory;
+    localStorage.removeItem("userNewsHistory");
+    location.reload();
+}
 
 async function openChat(newsContent) {
     // console.log('openChat called with content:', newsContent); // 添加此行来跟踪函数调用
@@ -300,6 +320,10 @@ async function fetchNews(category = 'general', element = null, recommendation = 
         element.classList.replace('text-gray-700', 'text-blue-500');
     }
 
+    // Change selection (top stories vs. your favorite)
+    const selection = document.getElementById("pages");
+    selection.options[0].selected = true;
+
     // Generate search query dynamically based on whether user chooses recommendation
     let searchQuery = false;
 
@@ -307,7 +331,7 @@ async function fetchNews(category = 'general', element = null, recommendation = 
         searchQuery = await generatePersonalizedQuery();
     }
 
-    const url = `https://gnews.io/api/v4/top-headlines?category=${category}${(searchQuery && searchQuery != NOT_ENOUGH_DATA) ? "&q="+searchQuery : ""}&lang=en&token=${apiKey}&expand=content`;
+    const url = `https://gnews.io/api/v4/top-headlines?category=${category}${(searchQuery && searchQuery != NOT_ENOUGH_DATA) ? "&q="+encodeURIComponent(searchQuery) : ""}&lang=en&token=${apiKey}&expand=content`;
 
     // save user history
     if(!recommendation && category != 'general'){
@@ -333,6 +357,9 @@ async function fetchNews(category = 'general', element = null, recommendation = 
         console.error('Error fetching news:', error);
         // alert('Failed to fetch news. Please check the console for more details.');
     }
+
+    // DEBUG: mock articles list, doesn't use gnews api quota. Either use this or the try-catch block above
+    // updateNews(mockArticles);
 }
 
 function updateNews(articles) {
@@ -371,11 +398,15 @@ function updateNews(articles) {
             // await fetchNews('general', null, false, false, timeline_keywords)
             // console.log(JSON.stringify(article));
         };
+        const favButton = document.createElement('i');
+        favButton.className = userHistory.favNews.some(a => a.title == article.title) ? FAVED_BUTTON_CLASS : UNFAVED_BUTTON_CLASS;
+        favButton.onclick = () => {toggleUserFavorite(favButton, article)};
 
         newsArticle.appendChild(articleLink);
         newsArticle.appendChild(chatButton);
         newsArticle.appendChild(divider);
         newsArticle.appendChild(timelineButton);
+        newsArticle.appendChild(favButton);
         newsContainer.appendChild(newsArticle);
     });
 }
@@ -395,7 +426,7 @@ function saveUserHistory(object, field){
 async function genTimelineQuery(content){
     let queryMessage = 
         `Imagine you're an advanced news recommendation system. 
-Based on this article content, generate at most 3 keywords as the names of main person in the news or the company names or the locations. Concatenate them with the keyword OR. 
+Based on this article content, generate at most ${TIMELINE_KEYWORD_LIMIT} keywords as the names of main person in the news or the company names or the locations. Concatenate them with the keyword OR. 
 If there's not enough data, just return ${NOT_ENOUGH_DATA}.
 ${JSON.stringify(content)}`;
     let message = [{"role": "user", "content": queryMessage}];
@@ -542,12 +573,14 @@ function showPopup(button, content, main_article) {
         timelineButton.textContent = keyword;
         // onclick: LLM search & Summary & Recommend
         timelineButton.onclick = async () => {
+            document.body.style.cursor = 'wait';
             articles = await searchNews(keyword);
             timeline_summary = await genTimelineSummary(main_article, keyword, articles);
             // console.log(timeline_summary)
             timeline_selections = JSON.parse(timeline_summary)
-            // console.log(timeline_selections)
+            console.log(timeline_selections)
             textPopup(timelineButton, timeline_selections, articles)
+            document.body.style.cursor = 'default';
         };
         popup.appendChild(timelineButton)
         popup.appendChild(divider)
@@ -555,11 +588,17 @@ function showPopup(button, content, main_article) {
 }
 
 async function generatePersonalizedQuery(){
+    // parse user history such that it only contains title
+    let userHistoryForQuery = JSON.parse(JSON.stringify(userHistory)); // Deep copy
+    userHistoryForQuery.favNews = userHistory.favNews.map(a => a.title);
+
+    // generate OpenAI prompt
     let queryMessage = 
-        `Imagine you're an advanced news recommendation system. 
-        Based on this user view and search history data along with their frequency, generate at most 10 keywords that best fit the user's preferences. Concatenate them with the keyword OR. 
-        If there's not enough data, just return ${NOT_ENOUGH_DATA}.
-        ${JSON.stringify(userHistory)}`;
+    `Imagine you're an advanced news recommendation system. 
+    Based on this user view and search history data along with their frequency, infer at most ${RECOMMENDER_KEYWORD_LIMIT} keywords on general news category or very specific events that best fit the user's preferences. 
+    Wrap each keyword with "" and concatenate them with the keyword OR. 
+    If there's not enough data, just return ${NOT_ENOUGH_DATA}.
+    ${JSON.stringify(userHistoryForQuery)}`;
     let message = [{"role": "user", "content": queryMessage}];
     console.log(queryMessage);
     try {
@@ -578,6 +617,30 @@ async function generatePersonalizedQuery(){
         appendMessage('Error', 'Failed to fetch response.', 'error'); // Show error in chat history
     }
 }
+
+function changePages(selectedValue){
+    const links = document.querySelectorAll('#categoryNav a');
+    links.forEach(link => link.classList.replace('text-blue-500', 'text-gray-700'));
+    if(selectedValue == 'topStories'){
+        fetchNews();
+    }else if(selectedValue == 'yourFavorite'){
+        updateNews(userHistory.favNews);
+    }
+}
+
+function toggleUserFavorite(favButton, article) {
+    if(userHistory.favNews.some(a => a.title == article.title)){
+        // unfavorite
+        favButton.className = UNFAVED_BUTTON_CLASS;
+        userHistory.favNews = userHistory.favNews.filter(a => a.title != article.title);
+    }else{
+        // favorite
+        favButton.className = FAVED_BUTTON_CLASS;
+        userHistory.favNews.push(article);
+    }
+    saveUserHistory(userHistory.favNews, article);
+}
+
 
     </script>
 </body>

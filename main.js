@@ -445,9 +445,9 @@ function textPopup(button, content, articles){
         const arrow = document.createElement('div');
         arrow.className = 'divider';
         arrow.textContent = '↓';
-        // if(ind == 0){
-        //     arrow.textContent = '===================================================';
-        // };
+        if(ind == 0){
+            arrow.textContent = '===================================================';
+        };
         
         // add arrow if not last entry
         if (ind != (keys.length - 1)){

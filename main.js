@@ -20,7 +20,6 @@ function clearUserHistory(){
 }
 
 async function openChat(newsContent) {
-    // console.log('openChat called with content:', newsContent); // 添加此行来跟踪函数调用
     document.getElementById('chatModal').style.display = 'block';
     document.getElementById('chatHistory').innerHTML = ''; // Reset chat history
     conversation = []; // Clear conversation history
@@ -95,7 +94,7 @@ async function searchNews(searchQuery = '', n_return = 10) {
         return
     }
 
-    const url = `https://gnews.io/api/v4/search?q="${searchQuery}"&lang=en&max=${n_return}&token=${apiKey}&expand=content`;
+    const url = `https://gnews.io/api/v4/search?q=${encodeURIComponent("(" + searchQuery.trim() + ")")}&lang=en&max=${n_return}&token=${apiKey}&expand=content`;
 
     try {
         const response = await fetch(url);
@@ -140,7 +139,6 @@ async function fetchNews(category = 'general', element = null, recommendation = 
     // save user history
     if(!recommendation && category != 'general'){
         saveUserHistory(userHistory.categoryHistory, category);
-        // console.log("test")
     }
     if(!recommendation && searchQuery){
         saveUserHistory(userHistory.searchHistory, searchQuery);
@@ -184,6 +182,7 @@ function updateNews(articles) {
         articleLink.onclick = () => saveUserHistory(userHistory.viewedNews, article.title);
         const chatButton = document.createElement('button');
         chatButton.textContent = 'Summary & Discuss';
+        chatButton.className = "textButton";
         chatButton.onclick = () => {
             saveUserHistory(userHistory.viewedNews, article.title);
             openChat(article.content);
@@ -194,11 +193,12 @@ function updateNews(articles) {
         divider.textContent = '|'
         // button for timeline functions
         const timelineButton = document.createElement('button');
+        timelineButton.className = 'textButton';
         timelineButton.textContent = 'TimeLine';
         timelineButton.onclick = async () => {
             saveUserHistory(userHistory.viewedNews, article.title);
             let timeline_keywords = await genTimelineQuery(article.content);
-            console.log(timeline_keywords);
+            // console.log(timeline_keywords);
             showPopup(timelineButton, timeline_keywords, article);
             // await fetchNews('general', null, false, false, timeline_keywords)
             // console.log(JSON.stringify(article));
@@ -219,7 +219,7 @@ function updateNews(articles) {
 // keep only json format in returned string from LLM
 function clear_json(json_str){
     if (json_str[0] != '{'){
-        console.log('clearing json string: ', json_str);
+        // console.log('clearing json string: ', json_str);
         json_str = json_str.match(/{.*}/);
     };  
     return json_str;
@@ -232,7 +232,7 @@ function saveUserHistory(object, field){
     }else{
         object[field] = 1;
     }
-    console.log(userHistory);
+    // console.log(userHistory);
     localStorage.setItem("userNewsHistory", JSON.stringify(userHistory));
 }
 
@@ -240,7 +240,7 @@ function saveUserHistory(object, field){
 async function genTimelineQuery(content){
     let queryMessage = 
         `You are an advanced news recommendation system. 
-Based on this article content, generate ${TIMELINE_KEYWORD_LIMIT} keywords as the full names of main person in the news or the company names or the locations. Concatenate them with the keyword OR. 
+Based on this article content, generate ${TIMELINE_KEYWORD_LIMIT} keywords as the full names of main person in the news or the company names or the locations. Wrap each keyword with () and concatenate them with the keyword OR.
 ${JSON.stringify(content)}`;
     let message = [{"role": "user", "content": queryMessage}];
     // console.log(queryMessage);
@@ -287,8 +287,8 @@ async function genTimelineSummary(main_article, keyword, retrieved_articles_json
             };
             titles.push(retrieved_articles[ind].title.toLowerCase())
         }
-        console.log("indicies_noduplicate: ", nodup_ind);
-        console.log("selectArticles: ", selectArticles);
+        // console.log("indicies_noduplicate: ", nodup_ind);
+        // console.log("selectArticles: ", selectArticles);
         if (selectArticles.length == 0) {
             return { "index": [], "summary": [] }
         }
@@ -319,7 +319,7 @@ async function genTimelineSummary(main_article, keyword, retrieved_articles_json
                 });
 
                 let relation_res = await relate.json();
-                console.log("LLM Classification for article:", article.title, "<--", relation_res.response, "-->", main_article.title);
+                // console.log("LLM Classification for article:", article.title, "<--", relation_res.response, "-->", main_article.title);
                 return relation_res.response;
             } catch (error) {
                 console.error('Error:', error);
@@ -327,10 +327,10 @@ async function genTimelineSummary(main_article, keyword, retrieved_articles_json
             }
         }));
 
-        console.log('All articles processed.');
+        // console.log('All articles processed.');
         const { selected_ind, selected_summaries } = await summarizer(relation, keyword, selectArticles, nodup_ind);
         const data = { "index": selected_ind, "summary": selected_summaries };
-        console.log('LLM Final Timeline: ', data);
+        // console.log('LLM Final Timeline: ', data);
         return data;
     } catch (error) {
         alert('Oops, there is an error! :', error);
@@ -366,7 +366,7 @@ async function summarizer(relation, keyword, selectArticles, nodup_ind) {
                 body: JSON.stringify({ conversation: summary_message })
             });
             let LLM_summary = await summaries.json();
-            console.log("LLM_summary for article: ", selectArticles[ind].title, " Summarization: ", LLM_summary.response);
+            // console.log("LLM_summary for article: ", selectArticles[ind].title, " Summarization: ", LLM_summary.response);
             return {
                 summary: LLM_summary.response,
                 index: nodup_ind[ind]
@@ -394,12 +394,14 @@ async function summarizer(relation, keyword, selectArticles, nodup_ind) {
 // content formatted as {"index": [array of selected indicies of articles, arranged in time order], "summary": [concise plain text summary of the selected articles, arranged the same order as in the "index" array ]}
 // articles: all article in the LLM query (10 articles)
 function textPopup(button, content, articles){
+    // boolean variable for whether we're displaying a timeline
+    const noTimeline = articles.length == 0 || content['index'].length == 0;
     const popup = document.createElement('div');
     popup.className = 'popup';
     document.body.appendChild(popup);
     let rect = button.getBoundingClientRect();
     popup.style.top = rect.top + window.scrollY + rect.height + 'px';
-    popup.style.left = rect.left + window.scrollX + 'px';
+    popup.style.left = Math.min(rect.left + window.scrollX, noTimeline ? 1100 : 800) + 'px';
     popup.style.display = 'block';
 
     document.addEventListener('click', function hidePopup(event) {
@@ -408,8 +410,19 @@ function textPopup(button, content, articles){
             document.removeEventListener('click', hidePopup);
         }
     });
+
+    // If there's no articles retrieved or selected, display "no timeline for this topic for now"
+    if(noTimeline){
+        const noTimelineMessage = document.createElement('p');
+        noTimelineMessage.innerHTML = `No timeline available about <i>${button.textContent}</i> for now`;
+        noTimelineMessage.style.color = 'grey';
+        popup.appendChild(noTimelineMessage);
+        return;
+    }
+
     // this button displayes the timeline summaries, when clicked, refill the page with timeline news contents
     const jumpTimelineButton = document.createElement('button');
+    jumpTimelineButton.className = "textButton";
     popup.appendChild(jumpTimelineButton);
     // get selected indicies, reverse to get time order from past --> now
     const keys = content['index'].reverse();
@@ -418,24 +431,17 @@ function textPopup(button, content, articles){
     // give timeline text, select articles for jump
     let selectArticles = []
 
-    if (keys.length <= 1){
-        const text = document.createElement('div');
-        text.innerText = '[No Timeline Found]'
-        jumpTimelineButton.appendChild(text);
-        jumpTimelineButton.onclick = () => {
-            popup.remove();
-        };
-        return;
-    };
-
     // Here, go through each selection to display summary and construct jumping page
     for (const ind in keys) {
-        // console.log(articles[key])
         // select with index of the current selected article in all searched
         const currentArticle = articles[keys[ind]]
         // create timeline text
         // get time of article
-        const newsDate = '[ ' + currentArticle.publishedAt.substring(0,10) + ' ]'
+        const options = {
+            dateStyle: "medium",
+            timeZone: "America/Los_Angeles"
+          };
+        const newsDate = '[ ' + new Date(currentArticle.publishedAt).toLocaleDateString("en-US", options) + ' ] '
         const summary = document.createElement('div');
         // get summary from LLM summaries
         summary.innerText = newsDate + summaries[ind];
@@ -458,7 +464,7 @@ function textPopup(button, content, articles){
         selectArticles.push(currentArticle)
     }
 
-    console.log(selectArticles)
+    // console.log(selectArticles)
 
     // if clicked, refill page with selected news
     jumpTimelineButton.onclick = async () => {
@@ -475,7 +481,7 @@ function showPopup(button, content, main_article) {
     
     let rect = button.getBoundingClientRect();
     popup.style.top = rect.top + window.scrollY + rect.height + 'px';
-    popup.style.left = rect.left + window.scrollX + 'px';
+    popup.style.left = Math.min(rect.left + window.scrollX, 1100) + 'px';
     popup.style.display = 'block';
 
     document.addEventListener('click', function hidePopup(event) {
@@ -493,24 +499,26 @@ function showPopup(button, content, main_article) {
     // display keywords 
     const keywords = content.split("OR")
     keywords.forEach(keyword => {
+        // clean up the space and parenthesis for keywords
+        keyword = keyword.trim();
+        keyword = keyword.substring(1, keyword.length - 1);
+        // Format keywords
         const divider = document.createElement('div');
         divider.className = 'divider';
         divider.textContent = '|'
         const timelineButton = document.createElement('button');
+        timelineButton.className = "textButton";
         timelineButton.textContent = keyword;
         // onclick: LLM search & Summary & Recommend
         timelineButton.onclick = async () => {
             document.body.style.cursor = 'wait';
             articles = await searchNews(keyword, n_return=10);
-            timeline_summary = await genTimelineSummary(main_article, keyword, articles);
-            // console.log(timeline_summary)
-            // if (timeline_summary[0] != '{'){
-            //     timeline_summary = timeline_summary.match(/{.*}/)[0]
-            // };  
-            console.log(timeline_summary)
-            // timeline_selections = JSON.parse(timeline_summary)
-            // console.log(timeline_selections)
-            textPopup(timelineButton, timeline_summary, articles)
+            if(articles.length == 0){
+                textPopup(timelineButton, null, articles);
+            }else{
+                timeline_summary = await genTimelineSummary(main_article, keyword, articles);
+                textPopup(timelineButton, timeline_summary, articles)
+            }
             document.body.style.cursor = 'default';
         };
         popup.appendChild(timelineButton)
@@ -524,14 +532,14 @@ async function generatePersonalizedQuery(){
     userHistoryForQuery.favNews = userHistory.favNews.map(a => a.title);
 
     // generate OpenAI prompt
-    let queryMessage = 
-    `Imagine you're an advanced news recommendation system. 
-    Based on this user view and search history data along with their frequency, infer at most ${RECOMMENDER_KEYWORD_LIMIT} keywords on general news category or very specific events that best fit the user's preferences. 
-    Wrap each keyword with "" and concatenate them with the keyword OR. 
-    If there's not enough data, just return ${NOT_ENOUGH_DATA}.
-    ${JSON.stringify(userHistoryForQuery)}`;
-    let message = [{"role": "user", "content": queryMessage}];
-    console.log(queryMessage);
+    let queryMessage = JSON.stringify(userHistoryForQuery);
+    let message = [{"role": "system", "content": `Imagine you're an advanced news recommendation system. 
+    Based on this user view and search history data along with their frequency, infer at most ${RECOMMENDER_KEYWORD_LIMIT} keywords on general news category or very specific events that best fit the user's preferences.
+    Each keyword has to be at most 2 English words.  
+    Wrap each keyword with () and concatenate them with the keyword OR. Add white space to both sides of the OR.  
+    If there's not enough data, just return ${NOT_ENOUGH_DATA}.`},
+        {"role": "user", "content": queryMessage}];
+    // console.log(queryMessage);
     try {
         const response = await fetch('/chat', {
             method: 'POST',
@@ -541,7 +549,7 @@ async function generatePersonalizedQuery(){
             body: JSON.stringify({conversation: message})
         });
         const data = await response.json();
-        console.log(data.response);
+        // console.log(data.response);
         return data.response;
     } catch (error) {
         console.error('Error during chat:', error);

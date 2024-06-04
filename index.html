@@ -56,8 +56,8 @@
             cursor: pointer;
             transition: background-color 0.3s;
         } */
-        button:hover {
-            background-color: #2563eb;
+        .textButton:hover {
+            color: #2563eb;
         }
         .message {
             padding: 5px;
@@ -145,8 +145,8 @@
                 <!-- Chat messages will be displayed here -->
             </div>
             <input type="text" id="chatInput" placeholder="Type your message here..." style="width: 80%; padding: 10px; margin-right: 10px; border-radius: 5px; border: 1px solid #ccc;">
-            <button onclick="sendChat()">Send</button>
-            <button onclick="closeChat()">Close</button>
+            <button class="textButton" onclick="sendChat()">Send</button>
+            <button class="textButton" onclick="closeChat()">Close</button>
         </div>
     </div>
     <script src="./dev-mockNewsList.js"></script>

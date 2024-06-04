@@ -9,7 +9,7 @@ let useLocalStorage = true;
 let defaultUserHistory = {searchHistory: {}, categoryHistory: {}, viewedNews: {}, favNews: []};
 let userHistory = useLocalStorage ? JSON.parse(localStorage.getItem("userNewsHistory")) || defaultUserHistory : defaultUserHistory; // Store user actions
 
-const apiKey = 'f97bf0827b7ffb71784b746556766e84';
+const apiKey = '87ba49e3d3117bd689cce790607d669c';
 
 // If need to clear userHistory, use localStorage.removeItem("userNewsHistory");
 
@@ -20,7 +20,6 @@ function clearUserHistory(){
 }
 
 async function openChat(newsContent) {
-    // console.log('openChat called with content:', newsContent); // 添加此行来跟踪函数调用
     document.getElementById('chatModal').style.display = 'block';
     document.getElementById('chatHistory').innerHTML = ''; // Reset chat history
     conversation = []; // Clear conversation history
@@ -95,7 +94,7 @@ async function searchNews(searchQuery = '', n_return = 10) {
         return
     }
 
-    const url = `https://gnews.io/api/v4/search?q="${searchQuery}"&lang=en&token=${apiKey}&expand=content`;
+    const url = `https://gnews.io/api/v4/search?q=${encodeURIComponent("(" + searchQuery.trim() + ")")}&lang=en&token=${apiKey}&expand=content`;
 
     try {
         const response = await fetch(url);
@@ -140,7 +139,6 @@ async function fetchNews(category = 'general', element = null, recommendation = 
     // save user history
     if(!recommendation && category != 'general'){
         saveUserHistory(userHistory.categoryHistory, category);
-        // console.log("test")
     }
     if(!recommendation && searchQuery){
         saveUserHistory(userHistory.searchHistory, searchQuery);
@@ -184,6 +182,7 @@ function updateNews(articles) {
         articleLink.onclick = () => saveUserHistory(userHistory.viewedNews, article.title);
         const chatButton = document.createElement('button');
         chatButton.textContent = 'Summary & Discuss';
+        chatButton.className = "textButton";
         chatButton.onclick = () => {
             saveUserHistory(userHistory.viewedNews, article.title);
             openChat(article.content);
@@ -194,11 +193,12 @@ function updateNews(articles) {
         divider.textContent = '|'
         // button for timeline functions
         const timelineButton = document.createElement('button');
+        timelineButton.className = 'textButton';
         timelineButton.textContent = 'TimeLine';
         timelineButton.onclick = async () => {
             saveUserHistory(userHistory.viewedNews, article.title);
             let timeline_keywords = await genTimelineQuery(article.content);
-            console.log(timeline_keywords);
+            // console.log(timeline_keywords);
             showPopup(timelineButton, timeline_keywords, article);
             // await fetchNews('general', null, false, false, timeline_keywords)
             // console.log(JSON.stringify(article));
@@ -223,7 +223,7 @@ function saveUserHistory(object, field){
     }else{
         object[field] = 1;
     }
-    console.log(userHistory);
+    // console.log(userHistory);
     localStorage.setItem("userNewsHistory", JSON.stringify(userHistory));
 }
 
@@ -231,7 +231,7 @@ function saveUserHistory(object, field){
 async function genTimelineQuery(content){
     let queryMessage = 
         `Imagine you're an advanced news recommendation system. 
-Based on this article content, generate at most ${TIMELINE_KEYWORD_LIMIT} keywords as the names of main person in the news or the company names or the locations. Concatenate them with the keyword OR. 
+Based on this article content, generate at most ${TIMELINE_KEYWORD_LIMIT} keywords as the names of main person in the news or the company names or the locations. Wrap each keyword with () and concatenate them with the keyword OR. 
 If there's not enough data, just return ${NOT_ENOUGH_DATA}.
 ${JSON.stringify(content)}`;
     let message = [{"role": "user", "content": queryMessage}];
@@ -262,10 +262,12 @@ async function genTimelineSummary(main_article, keyword, retrieved_articles){
                     Your job is to select articles in "Retrieved" that satisfies any of the two conditions: 1. either a cause or followup of the main_article. 
                      2. closely relates to the "main_article", especially the "keyword" given the context of "main_article".
                     Please give the response in JSON format following this template:
-                    {"index": [array of selected indicies of articles, arranged in time order], "summary": [concise plain text summary of the selected articles, mention the "keyword" and arrange the same order as in the "index" array]}
-                    You can select up to 6 articles. Do not select article with similar content as the selected ones. If, objectively, there is no article related, answer with {"index":[], "summary":[]}.` },
+                    {"index": [array of indicies of selected articles, arranged in time order], "summary": [concise plain text summary of the selected articles, mention the "keyword" and arrange the same order as in the "index" array]}
+                    You need to select up to 6 articles. Do not select article with similar content as the selected ones. If, objectively, there is no article related, answer with {"index":[], "summary":[]}.
+                    Return plain JSON content, don't wrap the output in README format like \`\`\`json. ` },
                     {"role": "user", "content": queryMessage}];
-    // console.log(queryMessage);
+    console.log(queryMessage);
+    console.log(retrieved_articles);
     try {
         const response = await fetch('/chat', {
             method: 'POST',
@@ -275,7 +277,7 @@ async function genTimelineSummary(main_article, keyword, retrieved_articles){
             body: JSON.stringify({conversation: message})
         });
         const data = await response.json();
-        // console.log(data.response);
+        console.log(data.response);
         return data.response;
     } catch (error) {
         console.error('Error during chat:', error);
@@ -288,12 +290,14 @@ async function genTimelineSummary(main_article, keyword, retrieved_articles){
 // content formatted as {"index": [array of selected indicies of articles, arranged in time order], "summary": [concise plain text summary of the selected articles, arranged the same order as in the "index" array ]}
 // articles: all article in the LLM query (10 articles)
 function textPopup(button, content, articles){
+    // boolean variable for whether we're displaying a timeline
+    const noTimeline = articles.length == 0 || content['index'].length == 0;
     const popup = document.createElement('div');
     popup.className = 'popup';
     document.body.appendChild(popup);
     let rect = button.getBoundingClientRect();
     popup.style.top = rect.top + window.scrollY + rect.height + 'px';
-    popup.style.left = rect.left + window.scrollX + 'px';
+    popup.style.left = Math.min(rect.left + window.scrollX, noTimeline ? 1100 : 800) + 'px';
     popup.style.display = 'block';
 
     document.addEventListener('click', function hidePopup(event) {
@@ -302,8 +306,19 @@ function textPopup(button, content, articles){
             document.removeEventListener('click', hidePopup);
         }
     });
+
+    // If there's no articles retrieved or selected, display "no timeline for this topic for now"
+    if(noTimeline){
+        const noTimelineMessage = document.createElement('p');
+        noTimelineMessage.innerHTML = `No timeline available about <i>${button.textContent}</i> for now`;
+        noTimelineMessage.style.color = 'grey';
+        popup.appendChild(noTimelineMessage);
+        return;
+    }
+
     // this button displayes the timeline summaries, when clicked, refill the page with timeline news contents
     const jumpTimelineButton = document.createElement('button');
+    jumpTimelineButton.className = "textButton";
     popup.appendChild(jumpTimelineButton);
     // get selected indicies, reverse to get time order from past --> now
     const keys = content['index'].reverse();
@@ -314,12 +329,18 @@ function textPopup(button, content, articles){
 
     // Here, go through each selection to display summary and construct jumping page
     for (const ind in keys) {
-        // console.log(articles[key])
         // select with index of the current selected article in all searched
         const currentArticle = articles[keys[ind]]
         // create timeline text
         // get time of article
-        const newsDate = '[ ' + currentArticle.publishedAt.substring(0,10) + ' ]'
+        const options = {
+            dateStyle: "medium",
+            timeZone: "America/Los_Angeles"
+          };
+        console.log(articles);
+        console.log(keys);
+        console.log(currentArticle);
+        const newsDate = '[ ' + new Date(currentArticle.publishedAt).toLocaleDateString("en-US", options) + ' ] '
         const summary = document.createElement('div');
         // get summary from LLM summaries
         summary.innerText = newsDate + summaries[ind];
@@ -338,7 +359,7 @@ function textPopup(button, content, articles){
         selectArticles.push(currentArticle)
     }
 
-    console.log(selectArticles)
+    // console.log(selectArticles)
 
     // if clicked, refill page with selected news
     jumpTimelineButton.onclick = async () => {
@@ -373,20 +394,29 @@ function showPopup(button, content, main_article) {
     // display keywords 
     const keywords = content.split("OR")
     keywords.forEach(keyword => {
+        // clean up the space and parenthesis for keywords
+        keyword = keyword.trim();
+        keyword = keyword.substring(1, keyword.length - 1);
+        // Format keywords
         const divider = document.createElement('div');
         divider.className = 'divider';
         divider.textContent = '|'
         const timelineButton = document.createElement('button');
+        timelineButton.className = "textButton";
         timelineButton.textContent = keyword;
         // onclick: LLM search & Summary & Recommend
         timelineButton.onclick = async () => {
             document.body.style.cursor = 'wait';
             articles = await searchNews(keyword);
-            timeline_summary = await genTimelineSummary(main_article, keyword, articles);
-            console.log(timeline_summary)
-            timeline_selections = JSON.parse(timeline_summary)
-            console.log(timeline_selections)
-            textPopup(timelineButton, timeline_selections, articles)
+            if(articles.length == 0){
+                textPopup(timelineButton, null, articles);
+            }else{
+                timeline_summary = await genTimelineSummary(main_article, keyword, articles);
+                console.log(timeline_summary)
+                timeline_selections = JSON.parse(timeline_summary)
+                console.log(timeline_selections)
+                textPopup(timelineButton, timeline_selections, articles)
+            }
             document.body.style.cursor = 'default';
         };
         popup.appendChild(timelineButton)
@@ -400,14 +430,14 @@ async function generatePersonalizedQuery(){
     userHistoryForQuery.favNews = userHistory.favNews.map(a => a.title);
 
     // generate OpenAI prompt
-    let queryMessage = 
-    `Imagine you're an advanced news recommendation system. 
-    Based on this user view and search history data along with their frequency, infer at most ${RECOMMENDER_KEYWORD_LIMIT} keywords on general news category or very specific events that best fit the user's preferences. 
-    Wrap each keyword with "" and concatenate them with the keyword OR. 
-    If there's not enough data, just return ${NOT_ENOUGH_DATA}.
-    ${JSON.stringify(userHistoryForQuery)}`;
-    let message = [{"role": "user", "content": queryMessage}];
-    console.log(queryMessage);
+    let queryMessage = JSON.stringify(userHistoryForQuery);
+    let message = [{"role": "system", "content": `Imagine you're an advanced news recommendation system. 
+    Based on this user view and search history data along with their frequency, infer at most ${RECOMMENDER_KEYWORD_LIMIT} keywords on general news category or very specific events that best fit the user's preferences.
+    Each keyword has to be at most 2 English words.  
+    Wrap each keyword with () and concatenate them with the keyword OR. Add white space to both sides of the OR.  
+    If there's not enough data, just return ${NOT_ENOUGH_DATA}.`},
+        {"role": "user", "content": queryMessage}];
+    // console.log(queryMessage);
     try {
         const response = await fetch('/chat', {
             method: 'POST',
@@ -417,7 +447,7 @@ async function generatePersonalizedQuery(){
             body: JSON.stringify({conversation: message})
         });
         const data = await response.json();
-        console.log(data.response);
+        // console.log(data.response);
         return data.response;
     } catch (error) {
         console.error('Error during chat:', error);

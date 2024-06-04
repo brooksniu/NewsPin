@@ -266,8 +266,8 @@ async function genTimelineSummary(main_article, keyword, retrieved_articles){
                     You need to select up to 6 articles. Do not select article with similar content as the selected ones. If, objectively, there is no article related, answer with {"index":[], "summary":[]}.
                     Return plain JSON content, don't wrap the output in README format like \`\`\`json. ` },
                     {"role": "user", "content": queryMessage}];
-    console.log(queryMessage);
-    console.log(retrieved_articles);
+    // console.log(queryMessage);
+    // console.log(retrieved_articles);
     try {
         const response = await fetch('/chat', {
             method: 'POST',
@@ -277,7 +277,7 @@ async function genTimelineSummary(main_article, keyword, retrieved_articles){
             body: JSON.stringify({conversation: message})
         });
         const data = await response.json();
-        console.log(data.response);
+        // console.log(data.response);
         return data.response;
     } catch (error) {
         console.error('Error during chat:', error);
@@ -337,9 +337,6 @@ function textPopup(button, content, articles){
             dateStyle: "medium",
             timeZone: "America/Los_Angeles"
           };
-        console.log(articles);
-        console.log(keys);
-        console.log(currentArticle);
         const newsDate = '[ ' + new Date(currentArticle.publishedAt).toLocaleDateString("en-US", options) + ' ] '
         const summary = document.createElement('div');
         // get summary from LLM summaries
@@ -412,9 +409,9 @@ function showPopup(button, content, main_article) {
                 textPopup(timelineButton, null, articles);
             }else{
                 timeline_summary = await genTimelineSummary(main_article, keyword, articles);
-                console.log(timeline_summary)
+                // console.log(timeline_summary)
                 timeline_selections = JSON.parse(timeline_summary)
-                console.log(timeline_selections)
+                // console.log(timeline_selections)
                 textPopup(timelineButton, timeline_selections, articles)
             }
             document.body.style.cursor = 'default';

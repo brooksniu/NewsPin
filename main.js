@@ -94,7 +94,7 @@ async function searchNews(searchQuery = '', n_return = 10) {
         return
     }
 
-    const url = `https://gnews.io/api/v4/search?q=${encodeURIComponent("(" + searchQuery.trim() + ")")}&lang=en&token=${apiKey}&expand=content`;
+    const url = `https://gnews.io/api/v4/search?q=${encodeURIComponent("(" + searchQuery.trim() + ")")}&lang=en&max=${n_return}&token=${apiKey}&expand=content`;
 
     try {
         const response = await fetch(url);
@@ -216,6 +216,15 @@ function updateNews(articles) {
     });
 }
 
+// keep only json format in returned string from LLM
+function clear_json(json_str){
+    if (json_str[0] != '{'){
+        // console.log('clearing json string: ', json_str);
+        json_str = json_str.match(/{.*}/);
+    };  
+    return json_str;
+}
+
 function saveUserHistory(object, field){
     let oldHistory = object[field];
     if(oldHistory){
@@ -230,9 +239,8 @@ function saveUserHistory(object, field){
 // given article content, get related news keywords
 async function genTimelineQuery(content){
     let queryMessage = 
-        `Imagine you're an advanced news recommendation system. 
-Based on this article content, generate at most ${TIMELINE_KEYWORD_LIMIT} keywords as the names of main person in the news or the company names or the locations. Wrap each keyword with () and concatenate them with the keyword OR. 
-If there's not enough data, just return ${NOT_ENOUGH_DATA}.
+        `You are an advanced news recommendation system. 
+Based on this article content, generate ${TIMELINE_KEYWORD_LIMIT} keywords as the full names of main person in the news or the company names or the locations. Wrap each keyword with () and concatenate them with the keyword OR.
 ${JSON.stringify(content)}`;
     let message = [{"role": "user", "content": queryMessage}];
     // console.log(queryMessage);
@@ -253,36 +261,132 @@ ${JSON.stringify(content)}`;
     }
 }
 
+// Old prompt:
+// the selected article should talk about the "keyword" under the context of "main_article". 
+// Your job is to select articles in "Retrieved" that is either a cause or followup of the main_article related to the "keyword".
+
 // given article content, get rankings of relations
-async function genTimelineSummary(main_article, keyword, retrieved_articles){
-    let queryMessage = `"main_article": ${JSON.stringify(main_article)}; "keyword": ${keyword}; "Retrieved": ${retrieved_articles}`;
-    let message = [{"role": "system", "content": `You are an advanced and helpful news recommendation and summarization system. Your summarization should be 
-                    concise and without any redundant sentences such as "This article talks about...". 
-                    You will be given a main article starting with label "main_article", a keyword starting with label "keyword", and an array of JSON objects starting after label "Retrieved", containing meatadata and content of 10 articles.
-                    Your job is to select articles in "Retrieved" that satisfies any of the two conditions: 1. either a cause or followup of the main_article. 
-                     2. closely relates to the "main_article", especially the "keyword" given the context of "main_article".
-                    Please give the response in JSON format following this template:
-                    {"index": [array of indicies of selected articles, arranged in time order], "summary": [concise plain text summary of the selected articles, mention the "keyword" and arrange the same order as in the "index" array]}
-                    You need to select up to 6 articles. Do not select article with similar content as the selected ones. If, objectively, there is no article related, answer with {"index":[], "summary":[]}.
-                    Return plain JSON content, don't wrap the output in README format like \`\`\`json. ` },
-                    {"role": "user", "content": queryMessage}];
-    // console.log(queryMessage);
-    // console.log(retrieved_articles);
+async function genTimelineSummary(main_article, keyword, retrieved_articles_json) {
+    retrieved_articles_json.push(main_article);
+    let retrieved_articles = retrieved_articles_json.map(article => ({
+        title: article.title,
+        description: article.description,
+        content: article.content,
+        publishedAt: article.publishedAt
+    }));
+
     try {
-        const response = await fetch('/chat', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({conversation: message})
-        });
-        const data = await response.json();
-        // console.log(data.response);
-        return data.response;
+        let selectArticles = [];
+        // check duplicate due to multiple sources
+        let titles = [];
+        let nodup_ind = [];
+        for (const ind in retrieved_articles) {
+            if (!titles.includes(retrieved_articles[ind].title.toLowerCase())) {
+                selectArticles.push(retrieved_articles[ind]);
+                nodup_ind.push(ind);
+            };
+            titles.push(retrieved_articles[ind].title.toLowerCase())
+        }
+        // console.log("indicies_noduplicate: ", nodup_ind);
+        // console.log("selectArticles: ", selectArticles);
+        if (selectArticles.length == 0) {
+            return { "index": [], "summary": [] }
+        }
+
+        let relation = await Promise.all(selectArticles.map(async (article) => {
+            let summaryQuery = `"main_article": ${main_article.title}, "keyword": [${keyword}]; "Selected": [${article.description}]`;
+            let summary_message = [
+                {
+                    "role": "system",
+                    "content": `You are an advanced and helpful news relationship classification system. 
+                                You will be given a main article starting with label "main_article", a keyword starting with label "keyword", and a JSON object starting after label "Selected", containing summary of a selected article.
+                                Your job is to classify whether two articles are related to each other regarding the "keyword". 
+                                Please give the response with true and false only, "true" if two articles are related with respect to keyword, "false" otherwise.`
+                },
+                {
+                    "role": "user",
+                    "content": summaryQuery
+                }
+            ];
+
+            try {
+                let relate = await fetch('/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ conversation: summary_message })
+                });
+
+                let relation_res = await relate.json();
+                // console.log("LLM Classification for article:", article.title, "<--", relation_res.response, "-->", main_article.title);
+                return relation_res.response;
+            } catch (error) {
+                console.error('Error:', error);
+                throw error;
+            }
+        }));
+
+        // console.log('All articles processed.');
+        const { selected_ind, selected_summaries } = await summarizer(relation, keyword, selectArticles, nodup_ind);
+        const data = { "index": selected_ind, "summary": selected_summaries };
+        // console.log('LLM Final Timeline: ', data);
+        return data;
     } catch (error) {
+        alert('Oops, there is an error! :', error);
         console.error('Error during chat:', error);
         appendMessage('Error', 'Failed to fetch response.', 'error'); // Show error in chat history
     }
+}
+
+async function summarizer(relation, keyword, selectArticles, nodup_ind) {
+    const summaryPromises = relation.map(async (rel, ind) => {
+        if (rel.toLowerCase() === "true") {
+            let summaryQuery = `"keyword": [${keyword}]; "Selected": [${selectArticles[ind].content}]`;
+            let summary_message = [
+                {
+                    "role": "system",
+                    "content": `You are an advanced and helpful news summarization system. Your summarization should be 
+                                concise and without any redundant sentences such as "This article talks about...". 
+                                You will be given a keyword starting with label "keyword", and a JSON object starting after label "Selected", containing meatadata and content of a selected article.
+                                Your job is to concisely summarize the "Selected" article mentioning "keyword".
+                                Please give the response with one concise plain text summary of the "content" field for the "Selected" article given, following this example:
+                                "1 to 2 very concise sentences of at most 100 words summarizing for the Selected article with keyword"`
+                },
+                {
+                    "role": "user",
+                    "content": summaryQuery
+                }
+            ];
+            let summaries = await fetch('/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ conversation: summary_message })
+            });
+            let LLM_summary = await summaries.json();
+            // console.log("LLM_summary for article: ", selectArticles[ind].title, " Summarization: ", LLM_summary.response);
+            return {
+                summary: LLM_summary.response,
+                index: nodup_ind[ind]
+            };
+        }
+        return null;
+    });
+
+    const results = await Promise.all(summaryPromises);
+    const selected_ind = [];
+    const selected_summaries = [];
+
+    results.forEach(result => {
+        if (result !== null) {
+            selected_ind.push(result.index);
+            selected_summaries.push(result.summary);
+        }
+    });
+
+    return { selected_ind, selected_summaries };
 }
 
 // button: the button when clicked to show the popup
@@ -347,6 +451,10 @@ function textPopup(button, content, articles){
         const arrow = document.createElement('div');
         arrow.className = 'divider';
         arrow.textContent = '↓';
+        if(ind == 0){
+            arrow.textContent = '===================================================';
+        };
+        
         // add arrow if not last entry
         if (ind != (keys.length - 1)){
             jumpTimelineButton.appendChild(arrow);
@@ -373,7 +481,7 @@ function showPopup(button, content, main_article) {
     
     let rect = button.getBoundingClientRect();
     popup.style.top = rect.top + window.scrollY + rect.height + 'px';
-    popup.style.left = rect.left + window.scrollX + 'px';
+    popup.style.left = Math.min(rect.left + window.scrollX, 1100) + 'px';
     popup.style.display = 'block';
 
     document.addEventListener('click', function hidePopup(event) {
@@ -404,15 +512,12 @@ function showPopup(button, content, main_article) {
         // onclick: LLM search & Summary & Recommend
         timelineButton.onclick = async () => {
             document.body.style.cursor = 'wait';
-            articles = await searchNews(keyword);
+            articles = await searchNews(keyword, n_return=10);
             if(articles.length == 0){
                 textPopup(timelineButton, null, articles);
             }else{
                 timeline_summary = await genTimelineSummary(main_article, keyword, articles);
-                // console.log(timeline_summary)
-                timeline_selections = JSON.parse(timeline_summary)
-                // console.log(timeline_selections)
-                textPopup(timelineButton, timeline_selections, articles)
+                textPopup(timelineButton, timeline_summary, articles)
             }
             document.body.style.cursor = 'default';
         };
@@ -475,3 +580,261 @@ function toggleUserFavorite(favButton, article) {
     saveUserHistory(userHistory.favNews, article);
 }
 
+        // selected_summaries = []
+        // // separately go through each article to avoid hallucination
+        // for (const ind in selectArticles) {
+        //     let summaryQuery = `"description": [${main_article.title}]; "keyword": [${keyword}]; "Selected": [${selectArticles[ind]}]`; 
+        //     let summary_message = [{"role": "system", "content": `You are an advanced and helpful news summarization system. Your summarization should be 
+        //             concise and without any redundant sentences such as "This article talks about...". 
+        //             You will be given a description starting with label "description", a keyword starting with label "keyword", and a JSON object starting after label "Selected", containing meatadata and content of a selected article.
+        //             Your job is to concisely summarize the "Selected" article, DO NOT include any content of "description" into the summarization! If the "Selected" article is not related with the "keyword" under the context of "description", use only word none as response without any newline characters.
+        //             Please give the response with one concise plain text summary of the "content" field for the "Selected" article given, following this example:
+        //             "1 to 3 concise sentences summarizing for the Selected article"` },
+        //             {"role": "user", "content": summaryQuery}];
+        //     let summaries = await fetch('/chat', {
+        //         method: 'POST',
+        //         headers: {
+        //             'Content-Type': 'application/json'
+        //         },
+        //         body: JSON.stringify({conversation: summary_message})
+        //     });
+        //     let LLM_summary = await summaries.json();
+        //     console.log("LLM_summary for article: ", selectArticles[ind].title, " Summarization: ", LLM_summary.response);
+        //     LLM_summary = LLM_summary.response;
+        //     selected_summaries.push(LLM_summary);
+        // }
+
+        // let summaryQuery = `"main_article": ${JSON.stringify(main_article)}; "keyword": ${keyword}; "Retrieved": ${selectArticles}`;
+        // let summaryQuery = `"Retrieved": ${selectArticles}`;
+        // mention the "keyword" and
+        // mention the "keyword" in summarization and show relationship between each article and "main_article"        
+        // You will be given an array of JSON objects starting after label "Selected", containing meatadata and content of selected articles.
+        // let summary_message = [{"role": "system", "content": `You are an advanced and helpful news summarization system. Your summarization should be 
+        //             concise and without any redundant sentences such as "This article talks about...". 
+        //             You will be given a keyword starting with label "keyword", and an array of JSON objects starting after label "Selected", containing meatadata and content of selected articles.
+        //             Your job is to concisely summarize each article after label "selected". If you think any article is not related with the "keyword", put "" in the response array for that article.
+        //             Please give the response in JSON format with one array of concise plain text summary of the "content" field for each article given, keep the same order as in the "selected" array, following this example:
+        //             {"summary": [few sentences summary for each article, separated with ","]}
+        //             reply with a JSON obejct and nothing else, the message should begin with { ` },
+        //             {"role": "user", "content": summaryQuery}];
+        // "summary": [array of concise plain text summary of each article given, mention the "keyword" and arrange the same order as in the "index" array]
+        // get summaries
+        
+
+        // exclude hallucination
+        // let verified_ind = []
+        // let verified_summary = []
+        // // create new indicies based on the summarizer
+        // for (const ind in selected_summaries) {
+        //     if (relation[ind].toLowerCase() == "true"){
+        //         verified_ind.push(nodup_ind[ind]);
+        //         verified_summary.push(selected_summaries[ind]);
+        //     }
+        // }
+        // condense into one json string
+        // const data = {"index":verified_ind, "summary": verified_summary};
+
+                // let relation = []
+        // // go through each summary to determine relativeness
+        // for (const ind in selectArticles) {
+        //     let summaryQuery = `"main_article": ${main_article.title}, "keyword": [${keyword}]; "Selected": [${selectArticles[ind].description}]`; 
+        //     let summary_message = [{"role": "system", "content": `You are an advanced and helpful news relationship classification system. 
+        //             You will be given a main article starting with label "main_article", a keyword starting with label "keyword", and a JSON object starting after label "Selected", containing summary of a selected article.
+        //             Your job is to classify whether two articles are related to each other regarding the "keyword". 
+        //             Please give the response with true and false only, "true" if two articles are related with respect to keyword, "false" otherwise.` },
+        //             {"role": "user", "content": summaryQuery}];
+        //     let realte = await fetch('/chat', {
+        //         method: 'POST',
+        //         headers: {
+        //             'Content-Type': 'application/json'
+        //         },
+        //         body: JSON.stringify({conversation: summary_message})
+        //     });
+        //     let relation_res = await realte.json();
+        //     // console.log("current article: ", selectArticles[ind])
+        //     console.log("LLM Classification for article: ", selectArticles[ind].title, "<--", relation_res.response,"-->", main_article.title);
+        //     relation.push(relation_res.response);
+        // }
+
+            // let queryMessage = `"main_article": ${JSON.stringify(main_article.content)}; "keyword": ${keyword}; "Retrieved": ${retrieved_articles}`;
+    // let message = [{"role": "system", "content": `You are an advanced and helpful news recommendation system. 
+    //                 You will be given a main article starting with label "main_article", a keyword starting with label "keyword", and an array of JSON objects starting after label "Retrieved", containing meatadata and content of up to 10 articles (could be less than 10).
+    //                 Your job is to select articles in "Retrieved" that satisfies any of the two conditions: 1. either a cause or followup of the "main_article". 
+    //                  2. closely relates to the "main_article", especially the "keyword" given the context of "main_article".
+    //                 You can select up to 6 articles. Provide your response with only the json object and nothing else. Your selection should be within range of indicies in "Retrieved".
+    //                 Please give the response in JSON format following this template:
+    //                 {"index": [array of selected indicies of articles, arranged in time order]}
+    //                 reply with only a JSON obejct and nothing else, do not include triple quotes, the message should begin with { ` },
+    //                 {"role": "user", "content": queryMessage}];
+    // console.log('retrieved_articles_json', retrieved_articles_json);
+    // console.log('retrieved_articles', retrieved_articles);
+    // console.log(message);
+
+
+            // get indicies 
+        // const selection_response = await fetch('/chat', {
+        //     method: 'POST',
+        //     headers: {
+        //         'Content-Type': 'application/json'
+        //     },
+        //     body: JSON.stringify({conversation: message})
+        // }); 
+        // let indicies = await selection_response.json();
+        // console.log("indicies_uncleared: ", indicies.response);
+        // indicies = JSON.parse(clear_json(indicies.response));
+        // get selected contents
+
+        // async function summarizer(relation, keyword, selectArticles, nodup_ind) {
+//     let selected_ind = [];
+//     let selected_summaries = [];
+//     // separately go through each article to avoid hallucination
+//     for (const ind in relation) {
+//         console.log('relationship: ', relation[ind].toLowerCase())
+//         if (relation[ind].toLowerCase() == "true") {
+//             let summaryQuery = `"keyword": [${keyword}]; "Selected": [${selectArticles[ind].content}]`;
+//             let summary_message = [
+//                 {
+//                     "role": "system",
+//                     "content": `You are an advanced and helpful news summarization system. Your summarization should be 
+//                                 concise and without any redundant sentences such as "This article talks about...". 
+//                                 You will be given a keyword starting with label "keyword", and a JSON object starting after label "Selected", containing meatadata and content of a selected article.
+//                                 Your job is to concisely summarize the "Selected" article mentioning "keyword".
+//                                 Please give the response with one concise plain text summary of the "content" field for the "Selected" article given, following this example:
+//                                 "1 to 2 very concise sentences of at most 100 words summarizing for the Selected article with keyword"`
+//                 },
+//                 {
+//                     "role": "user",
+//                     "content": summaryQuery
+//                 }
+//             ];
+//             let summaries = await fetch('/chat', {
+//                 method: 'POST',
+//                 headers: {
+//                     'Content-Type': 'application/json'
+//                 },
+//                 body: JSON.stringify({ conversation: summary_message })
+//             });
+//             let LLM_summary = await summaries.json();
+//             console.log("LLM_summary for article: ", selectArticles[ind].title, " Summarization: ", LLM_summary.response);
+//             LLM_summary = LLM_summary.response;
+//             selected_summaries.push(LLM_summary);
+//             selected_ind.push(nodup_ind[ind]);
+//         }
+//     }
+//     return { selected_ind, selected_summaries };
+// }
+
+// async function genTimelineSummary(main_article, keyword, retrieved_articles_json){
+//     retrieved_articles_json.push(main_article);
+//     let retrieved_articles = retrieved_articles_json.map(article => ({
+//         title: article.title,
+//         description: article.description,
+//         content: article.content,
+//         publishedAt: article.publishedAt
+//     }));
+
+//     try {
+//         let selectArticles = [];
+//         // check duplicate due to multiple sources
+//         let titles = [];
+//         let nodup_ind = [];
+//         for (const ind in retrieved_articles) {
+//             if (!titles.includes(retrieved_articles[ind].title.toLowerCase())){
+//                 selectArticles.push(retrieved_articles[ind]);
+//                 nodup_ind.push(ind);
+//             };
+//             titles.push(retrieved_articles[ind].title.toLowerCase())
+//         }
+//         console.log("indicies_noduplicate: ", nodup_ind);
+//         console.log("selectArticles: ", selectArticles);
+//         if (selectArticles.length == 0){
+//             return {"index":[], "summary": []}
+//         }
+
+//         let relation = [];
+
+//         Promise.all(selectArticles.map(async (article) => {
+//         let summaryQuery = `"main_article": ${main_article.title}, "keyword": [${keyword}]; "Selected": [${article.description}]`;
+//         let summary_message = [
+//             {
+//             "role": "system",
+//             "content": `You are an advanced and helpful news relationship classification system. 
+//                         You will be given a main article starting with label "main_article", a keyword starting with label "keyword", and a JSON object starting after label "Selected", containing summary of a selected article.
+//                         Your job is to classify whether two articles are related to each other regarding the "keyword". 
+//                         Please give the response with true and false only, "true" if two articles are related with respect to keyword, "false" otherwise.`
+//             },
+//             {
+//             "role": "user",
+//             "content": summaryQuery
+//             }
+//         ];
+
+//         try {
+//             let relate = await fetch('/chat', {
+//             method: 'POST',
+//             headers: {
+//                 'Content-Type': 'application/json'
+//             },
+//             body: JSON.stringify({ conversation: summary_message })
+//             });
+
+//             let relation_res = await relate.json();
+//             console.log("LLM Classification for article:", article.title, "<--", relation_res.response, "-->", main_article.title);
+//             relation.push(relation_res.response);
+//         } catch (error) {
+//             console.error('Error:', error);
+//             throw error;
+//         }
+//         }))
+//         .then(() => {
+//             console.log('All articles processed.');
+//             // Continue with further processing or use the 'relation' array as needed
+//             selected_ind, selected_summaries = summarizer(relation, keyword, selectArticles);
+//             return selected_ind, selected_summaries
+//         })
+//         .catch((error) => {
+//             console.error('Error:', error);
+//         });
+        
+//         const data = {"index": selected_ind, "summary": selected_summaries};
+//         console.log('LLM Final Timeline: ', data);
+//         return data;
+//     } catch (error) {
+//         alert('Oops, there is an error! :', error);
+//         console.error('Error during chat:', error);
+//         appendMessage('Error', 'Failed to fetch response.', 'error'); // Show error in chat history
+//     }
+// }
+
+
+// async function summarizer(relation, keyword, selectArticles){
+//     selected_ind = []
+//     selected_summaries = []
+//     // separately go through each article to avoid hallucination
+//     for (const ind in relation) {
+//         console.log('relationship: ', relation[ind].toLowerCase())
+//         if (relation[ind].toLowerCase() == "true"){
+//             let summaryQuery = `"keyword": [${keyword}]; "Selected": [${selectArticles[ind].content}]`; 
+//             let summary_message = [{"role": "system", "content": `You are an advanced and helpful news summarization system. Your summarization should be 
+//                     concise and without any redundant sentences such as "This article talks about...". 
+//                     You will be given a keyword starting with label "keyword", and a JSON object starting after label "Selected", containing meatadata and content of a selected article.
+//                     Your job is to concisely summarize the "Selected" article mentioning "keyword".
+//                     Please give the response with one concise plain text summary of the "content" field for the "Selected" article given, following this example:
+//                     "1 to 2 very concise sentences of at most 100 words summarizing for the Selected article with keyword"` },
+//                     {"role": "user", "content": summaryQuery}];
+//             let summaries = await fetch('/chat', {
+//                 method: 'POST',
+//                 headers: {
+//                     'Content-Type': 'application/json'
+//                 },
+//                 body: JSON.stringify({conversation: summary_message})
+//             });
+//             let LLM_summary = await summaries.json();
+//             console.log("LLM_summary for article: ", selectArticles[ind].title, " Summarization: ", LLM_summary.response);
+//             LLM_summary = LLM_summary.response;
+//             selected_summaries.push(LLM_summary);
+//             selected_ind.push(nodup_ind[ind]);
+//         }
+//     }
+//     return selected_ind, selected_summaries
+// }

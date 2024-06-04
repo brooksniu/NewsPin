@@ -198,6 +198,7 @@ function updateNews(articles) {
         timelineButton.onclick = async () => {
             saveUserHistory(userHistory.viewedNews, article.title);
             let timeline_keywords = await genTimelineQuery(article.content);
+            console.log(timeline_keywords);
             showPopup(timelineButton, timeline_keywords, article);
             // await fetchNews('general', null, false, false, timeline_keywords)
             // console.log(JSON.stringify(article));
@@ -337,6 +338,8 @@ function textPopup(button, content, articles){
         selectArticles.push(currentArticle)
     }
 
+    console.log(selectArticles)
+
     // if clicked, refill page with selected news
     jumpTimelineButton.onclick = async () => {
             popup.remove();
@@ -380,7 +383,7 @@ function showPopup(button, content, main_article) {
             document.body.style.cursor = 'wait';
             articles = await searchNews(keyword);
             timeline_summary = await genTimelineSummary(main_article, keyword, articles);
-            // console.log(timeline_summary)
+            console.log(timeline_summary)
             timeline_selections = JSON.parse(timeline_summary)
             console.log(timeline_selections)
             textPopup(timelineButton, timeline_selections, articles)

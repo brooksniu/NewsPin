@@ -16,7 +16,8 @@ def chat():
     client = OpenAI(api_key='')
     conversation = request.json['conversation']
     completion = client.chat.completions.create(
-        model="gpt-3.5-turbo",
+        # model="gpt-3.5-turbo",
+        model="gpt-4o",
         temperature=0.0,
         messages=conversation
     )

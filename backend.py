@@ -18,7 +18,7 @@ def chat():
     completion = client.chat.completions.create(
         # model="gpt-3.5-turbo",
         model="gpt-4o",
-        temperature=1.0,
+        temperature=0.0,
         messages=conversation
     )
     return jsonify({"response": completion.choices[0].message.content})

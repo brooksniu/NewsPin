@@ -129,13 +129,21 @@ async function fetchNews(category = 'general', element = null, recommendation = 
 
     // Generate search query dynamically based on whether user chooses recommendation
     let searchQuery = false;
+    let url;
 
     if(recommendation){
         searchQuery = await generatePersonalizedQuery();
+        if(searchQuery == "(" + NOT_ENOUGH_DATA + ")"){
+            alert("Unable to generate recommendation. Try browsing more. ");
+            return;
+        }
+        url = `https://gnews.io/api/v4/search?q=${encodeURIComponent(searchQuery)}&lang=en&token=${apiKey}&expand=content`;
+    }else{
+        url = `https://gnews.io/api/v4/top-headlines?category=${category}${(searchQuery && searchQuery != NOT_ENOUGH_DATA) ? "&q="+encodeURIComponent(searchQuery) : ""}&lang=en&token=${apiKey}&expand=content`;
     }
 
-    const url = `https://gnews.io/api/v4/top-headlines?category=${category}${(searchQuery && searchQuery != NOT_ENOUGH_DATA) ? "&q="+encodeURIComponent(searchQuery) : ""}&lang=en&token=${apiKey}&expand=content`;
 
+    console.log(url);
     // save user history
     if(!recommendation && category != 'general'){
         saveUserHistory(userHistory.categoryHistory, category);
@@ -294,7 +302,7 @@ async function genTimelineSummary(main_article, keyword, retrieved_articles_json
         }
 
         let relation = await Promise.all(selectArticles.map(async (article) => {
-            let summaryQuery = `"main_article": ${main_article.title}, "keyword": [${keyword}]; "Selected": [${article.description}]`;
+            let summaryQuery = `"main_article": ${main_article.description}, "keyword": [${keyword}]; "Selected": [${article.description}]`;
             let summary_message = [
                 {
                     "role": "system",
@@ -351,7 +359,7 @@ async function summarizer(relation, keyword, selectArticles, nodup_ind) {
                                 You will be given a keyword starting with label "keyword", and a JSON object starting after label "Selected", containing meatadata and content of a selected article.
                                 Your job is to concisely summarize the "Selected" article mentioning "keyword".
                                 Please give the response with one concise plain text summary of the "content" field for the "Selected" article given, following this example:
-                                "1 to 2 very concise sentences of at most 100 words summarizing for the Selected article with keyword"`
+                                "1 to 2 very concise sentences of at most 100 words summarizing for the Selected article beginning with keyword"`
                 },
                 {
                     "role": "user",
@@ -395,7 +403,7 @@ async function summarizer(relation, keyword, selectArticles, nodup_ind) {
 // articles: all article in the LLM query (10 articles)
 function textPopup(button, content, articles){
     // boolean variable for whether we're displaying a timeline
-    const noTimeline = articles.length == 0 || content['index'].length == 0;
+    const noTimeline = articles.length == 0 || content['index'].length <= 1;
     const popup = document.createElement('div');
     popup.className = 'popup';
     document.body.appendChild(popup);
@@ -414,9 +422,12 @@ function textPopup(button, content, articles){
     // If there's no articles retrieved or selected, display "no timeline for this topic for now"
     if(noTimeline){
         const noTimelineMessage = document.createElement('p');
-        noTimelineMessage.innerHTML = `No timeline available about <i>${button.textContent}</i> for now`;
+        noTimelineMessage.innerHTML = `No timeline available about <i>${button.textContent}</i> for now. Try increase news limit. `;
         noTimelineMessage.style.color = 'grey';
         popup.appendChild(noTimelineMessage);
+        noTimelineMessage.onclick = () => {
+            popup.remove();
+        };
         return;
     }
 
@@ -535,9 +546,9 @@ async function generatePersonalizedQuery(){
     let queryMessage = JSON.stringify(userHistoryForQuery);
     let message = [{"role": "system", "content": `Imagine you're an advanced news recommendation system. 
     Based on this user view and search history data along with their frequency, infer at most ${RECOMMENDER_KEYWORD_LIMIT} keywords on general news category or very specific events that best fit the user's preferences.
-    Each keyword has to be at most 2 English words.  
+    Each keyword has to be at most 2 English words. If there's any special symbols like "-", replace with white space. 
     Wrap each keyword with () and concatenate them with the keyword OR. Add white space to both sides of the OR.  
-    If there's not enough data, just return ${NOT_ENOUGH_DATA}.`},
+    If there's not enough data, just return ${NOT_ENOUGH_DATA} without the parenthesis.`},
         {"role": "user", "content": queryMessage}];
     // console.log(queryMessage);
     try {
@@ -549,7 +560,7 @@ async function generatePersonalizedQuery(){
             body: JSON.stringify({conversation: message})
         });
         const data = await response.json();
-        // console.log(data.response);
+        console.log(data.response);
         return data.response;
     } catch (error) {
         console.error('Error during chat:', error);
